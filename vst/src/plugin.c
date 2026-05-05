@@ -265,6 +265,10 @@ static bool plug_init(const struct clap_plugin *plugin) {
         plug->host->get_extension(plug->host, CLAP_EXT_STATE);
     plug->host_log = (const clap_host_log_t *)
         plug->host->get_extension(plug->host, CLAP_EXT_LOG);
+    plug->host_timer = (const clap_host_timer_support_t *)
+        plug->host->get_extension(plug->host, CLAP_EXT_TIMER_SUPPORT);
+    plug->host_posix_fd = (const clap_host_posix_fd_support_t *)
+        plug->host->get_extension(plug->host, CLAP_EXT_POSIX_FD_SUPPORT);
 
     // Load samples
     if (plug->samples_path[0] == '\0') {

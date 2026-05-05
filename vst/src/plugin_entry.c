@@ -49,32 +49,59 @@ factory_create_plugin(const struct clap_plugin_factory *factory,
     if (plugin) {
         // Set the samples path based on the plugin path
         ggd_plugin_t *plug = plugin->plugin_data;
-        // Try to resolve samples path from plugin location
+        // Resolve the plugin directory to an absolute path
+        char base[1024] = {0};
         if (s_plugin_path[0]) {
-            char base[1024];
-            strncpy(base, s_plugin_path, sizeof(base) - 1);
+            // plugin_path may be a file path or a directory
+            char resolved[1024];
+            if (realpath(s_plugin_path, resolved)) {
+                strncpy(base, resolved, sizeof(base) - 1);
+            } else {
+                strncpy(base, s_plugin_path, sizeof(base) - 1);
+            }
+            // Strip filename if it looks like a file (has a dot in last component)
             char *last_slash = strrchr(base, '/');
             if (last_slash) {
-                *last_slash = '\0';
-                // Try several candidate paths relative to plugin dir
-                const char *candidates[] = {
-                    "%s/output/wav",       // ~/.clap/output/wav (sibling)
-                    "%s/../output/wav",    // <project>/output/wav (dev layout)
-                    "%s/wav",              // ~/.clap/wav (flat)
-                    NULL
-                };
-                char try_path[1024];
-                for (int i = 0; candidates[i]; i++) {
-                    snprintf(try_path, sizeof(try_path), candidates[i], base);
-                    DIR *d = opendir(try_path);
-                    if (d) {
-                        closedir(d);
+                if (strchr(last_slash, '.'))
+                    *last_slash = '\0';  // strip filename
+            }
+        }
+
+        // If base is still empty, try ~/.clap
+        if (!base[0]) {
+            const char *home = getenv("HOME");
+            if (home)
+                snprintf(base, sizeof(base), "%s/.clap", home);
+        }
+
+        fprintf(stderr, "ggd-libre: plugin_path='%s' resolved base='%s'\n",
+                s_plugin_path, base);
+
+        if (base[0]) {
+            const char *candidates[] = {
+                "%s/output/wav",       // ~/.clap/output/wav
+                "%s/../output/wav",    // <project>/output/wav (dev layout)
+                "%s/wav",              // ~/.clap/wav (flat)
+                NULL
+            };
+            char try_path[1024];
+            for (int i = 0; candidates[i]; i++) {
+                snprintf(try_path, sizeof(try_path), candidates[i], base);
+                DIR *d = opendir(try_path);
+                if (d) {
+                    closedir(d);
+                    // Store the realpath so logs show a clean absolute path
+                    char abs[1024];
+                    if (realpath(try_path, abs))
+                        strncpy(plug->samples_path, abs, sizeof(plug->samples_path) - 1);
+                    else
                         strncpy(plug->samples_path, try_path, sizeof(plug->samples_path) - 1);
-                        break;
-                    }
+                    fprintf(stderr, "ggd-libre: found samples at %s\n", plug->samples_path);
+                    break;
                 }
             }
         }
+
         // Environment variable overrides auto-detection
         const char *env = getenv("GGD_SAMPLES_PATH");
         if (env && env[0])

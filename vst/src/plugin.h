@@ -10,9 +10,11 @@
 typedef struct ggd_plugin {
     clap_plugin_t  plugin;
     const clap_host_t *host;
-    const clap_host_params_t *host_params;
-    const clap_host_state_t  *host_state;
-    const clap_host_log_t    *host_log;
+    const clap_host_params_t          *host_params;
+    const clap_host_state_t           *host_state;
+    const clap_host_log_t             *host_log;
+    const clap_host_timer_support_t   *host_timer;
+    const clap_host_posix_fd_support_t *host_posix_fd;
 
     SampleBank   bank;
     MidiMap      midi_map;

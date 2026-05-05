@@ -577,10 +577,38 @@ static bool gui_create(const clap_plugin_t *plugin, const char *api, bool is_flo
     return true;
 }
 
+static void gui_unregister_callbacks(ggd_plugin_t *plug, PluginGui *gui) {
+    if (gui->timer_registered && plug->host_timer) {
+        plug->host_timer->unregister_timer(plug->host, gui->timer_id);
+        gui->timer_registered = false;
+    }
+    if (gui->fd_registered && plug->host_posix_fd) {
+        int fd = ConnectionNumber(gui->display);
+        plug->host_posix_fd->unregister_fd(plug->host, fd);
+        gui->fd_registered = false;
+    }
+}
+
+static void gui_register_callbacks(ggd_plugin_t *plug, PluginGui *gui) {
+    // Register a 30Hz timer for periodic redraws
+    if (!gui->timer_registered && plug->host_timer) {
+        if (plug->host_timer->register_timer(plug->host, 33, &gui->timer_id))
+            gui->timer_registered = true;
+    }
+    // Register X11 fd for event-driven updates
+    if (!gui->fd_registered && plug->host_posix_fd && gui->display) {
+        int fd = ConnectionNumber(gui->display);
+        if (plug->host_posix_fd->register_fd(plug->host, fd, CLAP_POSIX_FD_READ))
+            gui->fd_registered = true;
+    }
+}
+
 static void gui_destroy(const clap_plugin_t *plugin) {
     ggd_plugin_t *plug = plugin->plugin_data;
     PluginGui *gui = plug->gui;
     if (!gui) return;
+
+    gui_unregister_callbacks(plug, gui);
 
     if (gui->cr) cairo_destroy(gui->cr);
     if (gui->surface) cairo_surface_destroy(gui->surface);
@@ -657,7 +685,11 @@ static bool gui_show(const clap_plugin_t *plugin) {
     if (!gui || !gui->window) return false;
 
     XMapWindow(gui->display, gui->window);
+    XFlush(gui->display);
     gui->visible = true;
+
+    gui_register_callbacks(plug, gui);
+
     draw_gui(gui);
     return true;
 }
@@ -666,6 +698,8 @@ static bool gui_hide(const clap_plugin_t *plugin) {
     ggd_plugin_t *plug = plugin->plugin_data;
     PluginGui *gui = plug->gui;
     if (!gui || !gui->window) return false;
+
+    gui_unregister_callbacks(plug, gui);
 
     XUnmapWindow(gui->display, gui->window);
     gui->visible = false;

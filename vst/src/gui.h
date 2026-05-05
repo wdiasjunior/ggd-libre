@@ -40,6 +40,11 @@ typedef struct {
     // Back-reference
     ggd_plugin_t *plug;
 
+    // Host timer/fd tracking
+    clap_id timer_id;
+    bool    timer_registered;
+    bool    fd_registered;
+
     bool   visible;
     bool   created;
 } PluginGui;
