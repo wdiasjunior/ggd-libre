@@ -1,3 +1,9 @@
 GGD Matt Halpern Signature Pack KONTAKT
 output
-vst/build
+
+# Build artifacts
+plugin/src/*.o
+plugin/third_party/cjson/*.o
+plugin/third_party/mingw-cairo/build/
+plugin/third_party/mingw-cairo/linux-sysroot/
+plugin/third_party/mingw-cairo/sysroot/
