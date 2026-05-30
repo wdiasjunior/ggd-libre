@@ -1,0 +1,8 @@
+prefix=/home/wjr/Desktop/coding_projects/music/ggd-libre/vst/third_party/mingw-cairo/sysroot
+includedir=${prefix}/include
+
+Name: cairo-tee
+Description: Tee surface backend for cairo graphics library
+Version: 1.18.5
+Requires: cairo
+Cflags: -I${includedir}

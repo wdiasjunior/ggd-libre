@@ -1,0 +1,10 @@
+prefix=/home/wjr/Desktop/coding_projects/music/ggd-libre/vst/third_party/mingw-cairo/sysroot
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: cairo
+Description: Multi-platform 2D graphics library
+Version: 1.18.5
+Requires: pixman-1 >=  0.40.0
+Libs: -L${libdir} -lcairo -lm -lgdi32 -lmsimg32
+Cflags: -I${includedir}/cairo

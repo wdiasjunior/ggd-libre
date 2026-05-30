@@ -12,6 +12,7 @@ typedef struct {
 } NoteVariant;
 
 typedef struct {
+    char        name[64];
     NoteVariant variants[MAX_VARIANTS];
     int         num_variants;
     int         active_variant;

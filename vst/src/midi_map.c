@@ -79,6 +79,10 @@ bool midi_map_load(MidiMap *map, const SampleBank *bank, const char *json_path) 
 
         MidiNoteSlot *slot = &map->slots[midi_note];
 
+        cJSON *name_item = cJSON_GetObjectItem(entry, "name");
+        if (name_item && name_item->valuestring)
+            strncpy(slot->name, name_item->valuestring, sizeof(slot->name) - 1);
+
         cJSON *samples_arr = cJSON_GetObjectItem(entry, "samples");
         if (!samples_arr) continue;
 

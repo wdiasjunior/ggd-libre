@@ -7,6 +7,7 @@
 #include <string.h>
 
 // Forward declarations for extension structs
+static const clap_plugin_note_name_t   s_note_name;
 static const clap_plugin_audio_ports_t s_audio_ports;
 static const clap_plugin_note_ports_t  s_note_ports;
 static const clap_plugin_params_t      s_params;
@@ -71,6 +72,43 @@ static bool note_ports_get(const clap_plugin_t *plugin, uint32_t index,
 static const clap_plugin_note_ports_t s_note_ports = {
     .count = note_ports_count,
     .get = note_ports_get,
+};
+
+// ---------- Note Names ----------
+
+static uint32_t note_name_count(const clap_plugin_t *plugin) {
+    ggd_plugin_t *plug = plugin->plugin_data;
+    uint32_t count = 0;
+    for (int i = 0; i < MAX_MIDI_NOTES; i++) {
+        if (plug->midi_map.slots[i].num_variants > 0 && plug->midi_map.slots[i].name[0])
+            count++;
+    }
+    return count;
+}
+
+static bool note_name_get(const clap_plugin_t *plugin, uint32_t index,
+                           clap_note_name_t *note_name) {
+    ggd_plugin_t *plug = plugin->plugin_data;
+    uint32_t count = 0;
+    for (int i = 0; i < MAX_MIDI_NOTES; i++) {
+        if (plug->midi_map.slots[i].num_variants > 0 && plug->midi_map.slots[i].name[0]) {
+            if (count == index) {
+                strncpy(note_name->name, plug->midi_map.slots[i].name, CLAP_NAME_SIZE - 1);
+                note_name->name[CLAP_NAME_SIZE - 1] = '\0';
+                note_name->port = -1;
+                note_name->key = (int16_t)i;
+                note_name->channel = -1;
+                return true;
+            }
+            count++;
+        }
+    }
+    return false;
+}
+
+static const clap_plugin_note_name_t s_note_name = {
+    .count = note_name_count,
+    .get = note_name_get,
 };
 
 // ---------- Params ----------
@@ -431,11 +469,12 @@ static clap_process_status plug_process(const struct clap_plugin *plugin,
 static const void *plug_get_extension(const struct clap_plugin *plugin, const char *id) {
     if (!strcmp(id, CLAP_EXT_AUDIO_PORTS))       return &s_audio_ports;
     if (!strcmp(id, CLAP_EXT_NOTE_PORTS))        return &s_note_ports;
+    if (!strcmp(id, CLAP_EXT_NOTE_NAME))         return &s_note_name;
     if (!strcmp(id, CLAP_EXT_PARAMS))            return &s_params;
     if (!strcmp(id, CLAP_EXT_STATE))             return &s_state;
-#ifdef __linux__
     if (!strcmp(id, CLAP_EXT_GUI))               return &ggd_gui_ext;
     if (!strcmp(id, CLAP_EXT_TIMER_SUPPORT))     return &ggd_timer_ext;
+#ifdef __linux__
     if (!strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT))  return &ggd_posix_fd_ext;
 #endif
     return NULL;

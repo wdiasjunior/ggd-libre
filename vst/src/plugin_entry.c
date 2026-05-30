@@ -6,6 +6,38 @@
 #include <clap/clap.h>
 #include "plugin.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#define PATH_SEP '\\'
+static void resolve_absolute(const char *path, char *out, size_t out_size) {
+    if (!_fullpath(out, path, (int)out_size))
+        strncpy(out, path, out_size - 1);
+}
+static const char *get_home_dir(void) {
+    const char *p = getenv("USERPROFILE");
+    if (!p) p = getenv("APPDATA");
+    return p;
+}
+static const char *get_clap_subdir(void) { return "/Common Files/CLAP"; }
+#else
+#define PATH_SEP '/'
+static void resolve_absolute(const char *path, char *out, size_t out_size) {
+    if (!realpath(path, out))
+        strncpy(out, path, out_size - 1);
+}
+static const char *get_home_dir(void) { return getenv("HOME"); }
+static const char *get_clap_subdir(void) { return "/.clap"; }
+#endif
+
+// Find last path separator (handles both / and \ on Windows)
+static char *find_last_sep(char *path) {
+    char *a = strrchr(path, '/');
+    char *b = strrchr(path, '\\');
+    if (!a) return b;
+    if (!b) return a;
+    return (a > b) ? a : b;
+}
+
 static char s_plugin_path[1024] = {0};
 
 static bool entry_init(const char *plugin_path) {
@@ -19,17 +51,14 @@ static void entry_deinit(void) {}
 // ---------- Plugin Factory ----------
 
 static uint32_t factory_get_count(const struct clap_plugin_factory *factory) {
+    (void)factory;
     return 1;
 }
 
 static const clap_plugin_descriptor_t *
 factory_get_descriptor(const struct clap_plugin_factory *factory, uint32_t index) {
+    (void)factory;
     if (index != 0) return NULL;
-    // We need access to the descriptor; it's defined in plugin.c
-    // Create a temporary plugin to get its descriptor
-    // Actually, we'll just declare it extern or duplicate the descriptor.
-    // For simplicity, create the plugin, grab the desc, and rely on the host to call create.
-    // Better approach: expose the descriptor from plugin.c
     extern const clap_plugin_descriptor_t *ggd_get_descriptor(void);
     return ggd_get_descriptor();
 }
@@ -37,6 +66,7 @@ factory_get_descriptor(const struct clap_plugin_factory *factory, uint32_t index
 static const clap_plugin_t *
 factory_create_plugin(const struct clap_plugin_factory *factory,
                       const clap_host_t *host, const char *plugin_id) {
+    (void)factory;
     if (!clap_version_is_compatible(host->clap_version))
         return NULL;
 
@@ -47,31 +77,26 @@ factory_create_plugin(const struct clap_plugin_factory *factory,
 
     clap_plugin_t *plugin = ggd_plugin_create(host);
     if (plugin) {
-        // Set the samples path based on the plugin path
         ggd_plugin_t *plug = plugin->plugin_data;
+
         // Resolve the plugin directory to an absolute path
         char base[1024] = {0};
         if (s_plugin_path[0]) {
-            // plugin_path may be a file path or a directory
-            char resolved[1024];
-            if (realpath(s_plugin_path, resolved)) {
-                strncpy(base, resolved, sizeof(base) - 1);
-            } else {
-                strncpy(base, s_plugin_path, sizeof(base) - 1);
-            }
+            char resolved[1024] = {0};
+            resolve_absolute(s_plugin_path, resolved, sizeof(resolved));
+            strncpy(base, resolved, sizeof(base) - 1);
+
             // Strip filename if it looks like a file (has a dot in last component)
-            char *last_slash = strrchr(base, '/');
-            if (last_slash) {
-                if (strchr(last_slash, '.'))
-                    *last_slash = '\0';  // strip filename
-            }
+            char *last_sep = find_last_sep(base);
+            if (last_sep && strchr(last_sep, '.'))
+                *last_sep = '\0';
         }
 
-        // If base is still empty, try ~/.clap
+        // If base is still empty, try default CLAP dir
         if (!base[0]) {
-            const char *home = getenv("HOME");
+            const char *home = get_home_dir();
             if (home)
-                snprintf(base, sizeof(base), "%s/.clap", home);
+                snprintf(base, sizeof(base), "%s%s", home, get_clap_subdir());
         }
 
         fprintf(stderr, "ggd-libre: plugin_path='%s' resolved base='%s'\n",
@@ -79,9 +104,10 @@ factory_create_plugin(const struct clap_plugin_factory *factory,
 
         if (base[0]) {
             const char *candidates[] = {
-                "%s/output/wav",       // ~/.clap/output/wav
-                "%s/../output/wav",    // <project>/output/wav (dev layout)
-                "%s/wav",              // ~/.clap/wav (flat)
+                "%s/GGD Matt Halpern Signature Pack/wav",
+                "%s/output/wav",
+                "%s/../output/wav",
+                "%s/wav",
                 NULL
             };
             char try_path[1024];
@@ -90,12 +116,9 @@ factory_create_plugin(const struct clap_plugin_factory *factory,
                 DIR *d = opendir(try_path);
                 if (d) {
                     closedir(d);
-                    // Store the realpath so logs show a clean absolute path
-                    char abs[1024];
-                    if (realpath(try_path, abs))
-                        strncpy(plug->samples_path, abs, sizeof(plug->samples_path) - 1);
-                    else
-                        strncpy(plug->samples_path, try_path, sizeof(plug->samples_path) - 1);
+                    char abs[1024] = {0};
+                    resolve_absolute(try_path, abs, sizeof(abs));
+                    strncpy(plug->samples_path, abs, sizeof(plug->samples_path) - 1);
                     fprintf(stderr, "ggd-libre: found samples at %s\n", plug->samples_path);
                     break;
                 }
