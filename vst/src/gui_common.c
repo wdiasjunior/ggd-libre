@@ -32,7 +32,8 @@ static uint32_t get_time_ms(void) {
 #define BTN_W         30
 #define BTN_GAP       4
 #define KNOB_R        14
-#define MASTER_X      720
+#define STRIP_START_X 10
+#define SEPARATOR_GAP 15
 #define SELECTOR_H    35
 #define SELECTOR_W    120
 #define PREVIEW_BTN_H 20
@@ -46,18 +47,18 @@ typedef struct {
 
 static const StripInfo s_kick_strips[] = {
     { CH_KICK_CLOSE, "CLOSE" },
-    { CH_OH,         "OH" },
-    { CH_NEAR_ROOM,  "NEAR ROOM" },
-    { CH_FAR_ROOM,   "FAR ROOM" },
+    { CH_KICK_OH,    "OH" },
+    { CH_KICK_NEAR,  "NEAR ROOM" },
+    { CH_KICK_FAR,   "FAR ROOM" },
 };
 
 static const StripInfo s_snare_strips[] = {
     { CH_SNARE_TOP1,   "TOP MIC 1" },
     { CH_SNARE_TOP2,   "TOP MIC 2" },
     { CH_SNARE_BOTTOM, "BOTTOM" },
-    { CH_OH,           "OH" },
-    { CH_NEAR_ROOM,    "NEAR ROOM" },
-    { CH_FAR_ROOM,     "FAR ROOM" },
+    { CH_SNARE_OH,     "OH" },
+    { CH_SNARE_NEAR,   "NEAR ROOM" },
+    { CH_SNARE_FAR,    "FAR ROOM" },
 };
 
 static const StripInfo s_tom_strips[] = {
@@ -65,20 +66,20 @@ static const StripInfo s_tom_strips[] = {
     { CH_RACK2,      "RACK 2" },
     { CH_FLOOR1,     "FLOOR 1" },
     { CH_FLOOR2,     "FLOOR 2" },
-    { CH_OH,         "OH" },
-    { CH_NEAR_ROOM,  "NEAR ROOM" },
-    { CH_FAR_ROOM,   "FAR ROOM" },
+    { CH_TOMS_OH,    "OH" },
+    { CH_TOMS_NEAR,  "NEAR ROOM" },
+    { CH_TOMS_FAR,   "FAR ROOM" },
 };
 
 static const StripInfo s_cymbal_strips[] = {
-    { CH_HIHAT,      "HI-HAT" },
-    { CH_RIDE,       "RIDE" },
-    { CH_STACK,      "STACK" },
-    { CH_SPLASH,     "SPLASH" },
-    { CH_CHINA,      "CHINA" },
-    { CH_OH,         "OH" },
-    { CH_NEAR_ROOM,  "NEAR ROOM" },
-    { CH_FAR_ROOM,   "FAR ROOM" },
+    { CH_HIHAT,       "HI-HAT" },
+    { CH_RIDE,        "RIDE" },
+    { CH_STACK,       "STACK" },
+    { CH_SPLASH,      "SPLASH" },
+    { CH_CHINA,       "CHINA" },
+    { CH_CYMBALS_OH,  "OH" },
+    { CH_CYMBALS_NEAR,"NEAR ROOM" },
+    { CH_CYMBALS_FAR, "FAR ROOM" },
 };
 
 static const char *tab_names[TAB_COUNT] = { "KICK", "SNARE", "TOMS", "CYMBALS" };
@@ -91,6 +92,16 @@ static const StripInfo *get_strips(GuiTab tab, int *count) {
     case TAB_CYMBALS: *count = 8; return s_cymbal_strips;
     default:          *count = 0; return NULL;
     }
+}
+
+// ---------- Layout helpers ----------
+
+static int tab_master_x(int strip_count) {
+    return STRIP_START_X + strip_count * STRIP_W + SEPARATOR_GAP;
+}
+
+static int global_master_x(int strip_count) {
+    return tab_master_x(strip_count) + STRIP_W + SEPARATOR_GAP;
 }
 
 // ---------- Helpers ----------
@@ -142,8 +153,19 @@ static void draw_channel_strip(cairo_t *cr, ggd_plugin_t *plug,
 }
 
 static void draw_preview_button(cairo_t *cr, int x, int y, int w, int h) {
-    widget_draw_toggle(cr, x, y, w, h, false, "\xe2\x96\xb6",  // UTF-8 play triangle
+    // Draw button background
+    widget_draw_toggle(cr, x, y, w, h, false, "",
                        COL_ACCENT_R, COL_ACCENT_G, COL_ACCENT_B);
+    // Draw a play triangle manually
+    double cx = x + w / 2.0;
+    double cy = y + h / 2.0;
+    double sz = h * 0.3;
+    cairo_set_source_rgb(cr, COL_TEXT_R, COL_TEXT_G, COL_TEXT_B);
+    cairo_move_to(cr, cx - sz * 0.6, cy - sz);
+    cairo_line_to(cr, cx + sz * 0.8, cy);
+    cairo_line_to(cr, cx - sz * 0.6, cy + sz);
+    cairo_close_path(cr);
+    cairo_fill(cr);
 }
 
 static void draw_selector_with_preview(cairo_t *cr, int x, int *y,
@@ -235,23 +257,57 @@ void gui_draw(PluginGui *gui) {
     widget_draw_text(cr, 15, STRIP_TOP - 10, "GGD LIBRE", 16);
     cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
 
-    // Channel strips
+    // Channel strips (aligned left)
     int strip_count;
     const StripInfo *strips = get_strips(gui->active_tab, &strip_count);
-    int strip_start_x = 100;
     for (int i = 0; i < strip_count; i++) {
-        draw_channel_strip(cr, plug, strip_start_x + i * STRIP_W, &strips[i]);
+        draw_channel_strip(cr, plug, STRIP_START_X + i * STRIP_W, &strips[i]);
     }
 
-    // Master fader
-    float master_fv = db_to_fader(plug->engine.master_gain_db);
-    char master_text[32];
-    if (plug->engine.master_gain_db <= -80.0f)
-        snprintf(master_text, sizeof(master_text), "-inf");
-    else
-        snprintf(master_text, sizeof(master_text), "%.1f dB", plug->engine.master_gain_db);
-    widget_draw_fader(cr, MASTER_X, STRIP_TOP, STRIP_W, FADER_H,
-                      master_fv, "MASTER", master_text);
+    // Vertical separator after channel strips
+    int sep_x = tab_master_x(strip_count) - SEPARATOR_GAP / 2;
+    cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
+    cairo_set_line_width(cr, 1);
+    cairo_move_to(cr, sep_x, STRIP_TOP);
+    cairo_line_to(cr, sep_x, STRIP_TOP + FADER_H);
+    cairo_stroke(cr);
+
+    // Tab master fader (amber/orange color)
+    {
+        static const char *tab_master_labels[] = {"KICK", "SNARE", "TOMS", "CYMBALS"};
+        int tmx = tab_master_x(strip_count);
+        float tab_fv = db_to_fader(plug->engine.tab_master_db[gui->active_tab]);
+        char tab_text[32];
+        if (plug->engine.tab_master_db[gui->active_tab] <= -80.0f)
+            snprintf(tab_text, sizeof(tab_text), "-inf");
+        else
+            snprintf(tab_text, sizeof(tab_text), "%.1f dB",
+                     plug->engine.tab_master_db[gui->active_tab]);
+        widget_draw_fader_colored(cr, tmx, STRIP_TOP, STRIP_W, FADER_H,
+                                  tab_fv, tab_master_labels[gui->active_tab], tab_text,
+                                  0.85, 0.65, 0.25);  // amber
+    }
+
+    // Vertical separator before global master
+    sep_x = global_master_x(strip_count) - SEPARATOR_GAP / 2;
+    cairo_set_source_rgb(cr, 0.3, 0.3, 0.3);
+    cairo_move_to(cr, sep_x, STRIP_TOP);
+    cairo_line_to(cr, sep_x, STRIP_TOP + FADER_H);
+    cairo_stroke(cr);
+
+    // Global master fader (green color)
+    {
+        int gmx = global_master_x(strip_count);
+        float master_fv = db_to_fader(plug->engine.master_gain_db);
+        char master_text[32];
+        if (plug->engine.master_gain_db <= -80.0f)
+            snprintf(master_text, sizeof(master_text), "-inf");
+        else
+            snprintf(master_text, sizeof(master_text), "%.1f dB", plug->engine.master_gain_db);
+        widget_draw_fader_colored(cr, gmx, STRIP_TOP, STRIP_W, FADER_H,
+                                  master_fv, "MASTER", master_text,
+                                  0.30, 0.80, 0.35);  // green
+    }
 
     // Variant selectors
     draw_variant_selectors(cr, plug, gui->active_tab);
@@ -264,8 +320,9 @@ void gui_draw(PluginGui *gui) {
 
 typedef enum {
     HIT_NONE = 0, HIT_TAB, HIT_FADER, HIT_MUTE, HIT_SOLO,
-    HIT_PHASE, HIT_STEREO, HIT_PAN_KNOB, HIT_MASTER_FADER, HIT_SELECTOR,
-    HIT_PREVIEW,
+    HIT_PHASE, HIT_STEREO, HIT_PAN_KNOB,
+    HIT_TAB_MASTER_FADER, HIT_GLOBAL_MASTER_FADER,
+    HIT_SELECTOR, HIT_PREVIEW,
 } HitType;
 
 typedef struct {
@@ -283,18 +340,27 @@ static HitResult hit_test(PluginGui *gui, int mx, int my) {
         return r;
     }
 
-    if (mx >= MASTER_X && mx < MASTER_X + STRIP_W &&
+    int strip_count;
+    const StripInfo *strips = get_strips(gui->active_tab, &strip_count);
+
+    // Tab master fader
+    int tmx = tab_master_x(strip_count);
+    if (mx >= tmx && mx < tmx + STRIP_W &&
         my >= STRIP_TOP + 20 && my < STRIP_TOP + FADER_H - 30) {
-        r.type = HIT_MASTER_FADER;
+        r.type = HIT_TAB_MASTER_FADER;
         return r;
     }
 
-    int strip_count;
-    const StripInfo *strips = get_strips(gui->active_tab, &strip_count);
-    int strip_start_x = 100;
+    // Global master fader
+    int gmx = global_master_x(strip_count);
+    if (mx >= gmx && mx < gmx + STRIP_W &&
+        my >= STRIP_TOP + 20 && my < STRIP_TOP + FADER_H - 30) {
+        r.type = HIT_GLOBAL_MASTER_FADER;
+        return r;
+    }
 
     for (int i = 0; i < strip_count; i++) {
-        int sx = strip_start_x + i * STRIP_W;
+        int sx = STRIP_START_X + i * STRIP_W;
         if (mx < sx || mx >= sx + STRIP_W) continue;
 
         int fader_y = STRIP_TOP + 20, fader_h = FADER_H - 50;
@@ -467,8 +533,28 @@ void gui_handle_mouse_down(PluginGui *gui, int mx, int my) {
         }
         break;
 
-    case HIT_MASTER_FADER:
-        // Double-click: reset to 0 dB
+    case HIT_TAB_MASTER_FADER: {
+        int tab_pid = PARAM_TAB_MASTER_BASE + gui->active_tab;
+        if (gui->last_click_hit == tab_pid && (now - gui->last_click_time_ms) < DOUBLE_CLICK_MS) {
+            gui->plug->engine.tab_master_db[gui->active_tab] = 0.0f;
+            engine_update_tab_master(&gui->plug->engine, gui->active_tab);
+            gui->last_click_hit = -1;
+            break;
+        }
+        gui->last_click_hit = tab_pid;
+        gui->last_click_time_ms = now;
+
+        gui->dragging = true;
+        gui->drag_param_id = tab_pid;
+        gui->drag_start_y = my;
+        gui->drag_start_value = db_to_fader(gui->plug->engine.tab_master_db[gui->active_tab]);
+        float tv = fader_y_to_value(my, STRIP_TOP + 20, FADER_H - 50);
+        gui->plug->engine.tab_master_db[gui->active_tab] = fader_to_db(tv);
+        engine_update_tab_master(&gui->plug->engine, gui->active_tab);
+        break;
+    }
+
+    case HIT_GLOBAL_MASTER_FADER:
         if (gui->last_click_hit == PARAM_MASTER_GAIN && (now - gui->last_click_time_ms) < DOUBLE_CLICK_MS) {
             gui->plug->engine.master_gain_db = 0.0f;
             engine_update_master(&gui->plug->engine);
@@ -545,6 +631,12 @@ void gui_handle_mouse_move(PluginGui *gui, int mx, int my) {
         float v = fader_y_to_value(my, STRIP_TOP + 20, FADER_H - 50);
         gui->plug->engine.master_gain_db = fader_to_db(v);
         engine_update_master(&gui->plug->engine);
+    } else if (gui->drag_param_id >= PARAM_TAB_MASTER_BASE &&
+               gui->drag_param_id < PARAM_TAB_MASTER_BASE + TAB_COUNT) {
+        int t = gui->drag_param_id - PARAM_TAB_MASTER_BASE;
+        float v = fader_y_to_value(my, STRIP_TOP + 20, FADER_H - 50);
+        gui->plug->engine.tab_master_db[t] = fader_to_db(v);
+        engine_update_tab_master(&gui->plug->engine, (GuiTab)t);
     } else if (param_is_channel(gui->drag_param_id, &ch, &offset)) {
         if (offset == PARAM_CH_GAIN) {
             float v = fader_y_to_value(my, STRIP_TOP + 20, FADER_H - 50);

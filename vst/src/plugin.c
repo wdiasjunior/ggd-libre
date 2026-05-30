@@ -131,6 +131,11 @@ static bool plug_params_get_value(const clap_plugin_t *plugin, clap_id param_id,
         return true;
     }
 
+    if (param_id >= PARAM_TAB_MASTER_BASE && param_id < PARAM_TAB_MASTER_BASE + TAB_COUNT) {
+        *out = plug->engine.tab_master_db[param_id - PARAM_TAB_MASTER_BASE];
+        return true;
+    }
+
     MixerChannel ch;
     int offset;
     if (param_is_channel(param_id, &ch, &offset)) {
@@ -175,6 +180,13 @@ static void apply_param_value(ggd_plugin_t *plug, clap_id param_id, double value
     if (param_id == PARAM_MASTER_GAIN) {
         plug->engine.master_gain_db = (float)value;
         engine_update_master(&plug->engine);
+        return;
+    }
+
+    if (param_id >= PARAM_TAB_MASTER_BASE && param_id < PARAM_TAB_MASTER_BASE + TAB_COUNT) {
+        int t = param_id - PARAM_TAB_MASTER_BASE;
+        plug->engine.tab_master_db[t] = (float)value;
+        engine_update_tab_master(&plug->engine, (GuiTab)t);
         return;
     }
 

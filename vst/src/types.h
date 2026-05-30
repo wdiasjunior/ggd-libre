@@ -54,35 +54,46 @@ typedef enum {
     DRUM_TYPE_COUNT
 } DrumType;
 
-// Mixer channels — these are the faders shown in the UI
+// Mixer channels — these are the faders shown in the UI.
+// Room mics (OH, Near Room, Far Room) are per-tab, not shared.
 typedef enum {
-    // Close mic channels (per drum piece)
+    // Kick tab
     CH_KICK_CLOSE = 0,
+    CH_KICK_OH,
+    CH_KICK_NEAR,
+    CH_KICK_FAR,
+    // Snare tab
     CH_SNARE_TOP1,
     CH_SNARE_TOP2,
     CH_SNARE_BOTTOM,
+    CH_SNARE_OH,
+    CH_SNARE_NEAR,
+    CH_SNARE_FAR,
+    // Toms tab
     CH_RACK1,
     CH_RACK2,
     CH_FLOOR1,
     CH_FLOOR2,
+    CH_TOMS_OH,
+    CH_TOMS_NEAR,
+    CH_TOMS_FAR,
+    // Cymbals tab
     CH_HIHAT,
     CH_RIDE,
     CH_STACK,
     CH_SPLASH,
     CH_CHINA,
-    // Room mic channels (shared across all drums)
-    CH_OH,
-    CH_NEAR_ROOM,
-    CH_FAR_ROOM,
-    MIXER_CHANNEL_COUNT  // = 16
+    CH_CYMBALS_OH,
+    CH_CYMBALS_NEAR,
+    CH_CYMBALS_FAR,
+    MIXER_CHANNEL_COUNT  // = 25
 } MixerChannel;
 
 static const char *MIXER_CHANNEL_NAMES[MIXER_CHANNEL_COUNT] = {
-    "Kick Close",
-    "Snare Top 1", "Snare Top 2", "Snare Bottom",
-    "Rack 1", "Rack 2", "Floor 1", "Floor 2",
-    "Hi-Hat", "Ride", "Stack", "Splash", "China",
-    "OH", "Near Room", "Far Room"
+    "Kick Close", "Kick OH", "Kick Near", "Kick Far",
+    "Snare Top 1", "Snare Top 2", "Snare Bottom", "Snare OH", "Snare Near", "Snare Far",
+    "Rack 1", "Rack 2", "Floor 1", "Floor 2", "Toms OH", "Toms Near", "Toms Far",
+    "Hi-Hat", "Ride", "Stack", "Splash", "China", "Cymbals OH", "Cymbals Near", "Cymbals Far"
 };
 
 typedef enum {
@@ -104,6 +115,7 @@ typedef enum {
 
 // Parameter ID scheme
 #define PARAM_MASTER_GAIN       0
+#define PARAM_TAB_MASTER_BASE   1   // tab masters: 1=kick, 2=snare, 3=toms, 4=cymbals
 
 // Per-channel: base + channel*10 + offset
 #define PARAM_CHANNEL_BASE      100
@@ -129,7 +141,7 @@ typedef enum {
 #define PARAM_VAR_RCRASH_SIZE   309
 #define PARAM_VAR_COUNT         10
 
-#define TOTAL_PARAMS (1 + MIXER_CHANNEL_COUNT * PARAM_CH_COUNT + PARAM_VAR_COUNT)
+#define TOTAL_PARAMS (1 + TAB_COUNT + MIXER_CHANNEL_COUNT * PARAM_CH_COUNT + PARAM_VAR_COUNT)
 
 static inline uint32_t param_channel_id(MixerChannel ch, int offset) {
     return PARAM_CHANNEL_BASE + ch * 10 + offset;
@@ -144,15 +156,43 @@ static inline bool param_is_channel(uint32_t id, MixerChannel *ch, int *offset) 
     return *offset < PARAM_CH_COUNT;
 }
 
+// Which tab does this drum type belong to?
+static inline GuiTab drum_type_tab(DrumType drum) {
+    switch (drum) {
+    case DRUM_KICK:   return TAB_KICK;
+    case DRUM_SNARE:  return TAB_SNARE;
+    case DRUM_RACK1: case DRUM_RACK2:
+    case DRUM_FLOOR1: case DRUM_FLOOR2:
+        return TAB_TOMS;
+    default: return TAB_CYMBALS;
+    }
+}
+
 // Route a drum type + mic position to the correct mixer channel.
 // Returns -1 if this drum type doesn't use this mic position.
 static inline int get_mixer_channel(DrumType drum, MicPosition mic) {
-    // Room mics are shared across all drums
-    switch (mic) {
-    case MIC_OH:        return CH_OH;
-    case MIC_NEAR_ROOM: return CH_NEAR_ROOM;
-    case MIC_FAR_ROOM:  return CH_FAR_ROOM;
-    default: break;
+    // Room mics route to per-tab channels
+    if (mic == MIC_OH || mic == MIC_NEAR_ROOM || mic == MIC_FAR_ROOM) {
+        // Each tab has its own OH/Near/Far set
+        switch (drum_type_tab(drum)) {
+        case TAB_KICK:
+            if (mic == MIC_OH)        return CH_KICK_OH;
+            if (mic == MIC_NEAR_ROOM) return CH_KICK_NEAR;
+            return CH_KICK_FAR;
+        case TAB_SNARE:
+            if (mic == MIC_OH)        return CH_SNARE_OH;
+            if (mic == MIC_NEAR_ROOM) return CH_SNARE_NEAR;
+            return CH_SNARE_FAR;
+        case TAB_TOMS:
+            if (mic == MIC_OH)        return CH_TOMS_OH;
+            if (mic == MIC_NEAR_ROOM) return CH_TOMS_NEAR;
+            return CH_TOMS_FAR;
+        case TAB_CYMBALS:
+            if (mic == MIC_OH)        return CH_CYMBALS_OH;
+            if (mic == MIC_NEAR_ROOM) return CH_CYMBALS_NEAR;
+            return CH_CYMBALS_FAR;
+        default: return -1;
+        }
     }
     // Close mics route per drum type
     switch (drum) {
@@ -173,7 +213,7 @@ static inline int get_mixer_channel(DrumType drum, MicPosition mic) {
     case DRUM_CHINA:  return (mic == MIC_CLOSE) ? CH_CHINA : -1;
     case DRUM_STACK:  return (mic == MIC_CLOSE) ? CH_STACK : -1;
     case DRUM_SPLASH: return (mic == MIC_CLOSE) ? CH_SPLASH : -1;
-    case DRUM_LCRASH: return -1; // crashes have no close mic
+    case DRUM_LCRASH: return -1;
     case DRUM_RCRASH: return -1;
     case DRUM_ACCENT: return -1;
     default:          return -1;

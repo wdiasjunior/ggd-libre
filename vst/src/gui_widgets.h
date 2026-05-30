@@ -46,6 +46,11 @@ typedef struct {
 void widget_draw_fader(cairo_t *cr, int x, int y, int w, int h,
                        float value, const char *label, const char *value_text);
 
+// Draw a fader with custom color (for master faders)
+void widget_draw_fader_colored(cairo_t *cr, int x, int y, int w, int h,
+                               float value, const char *label, const char *value_text,
+                               double fr, double fg, double fb);
+
 // Draw a pan knob. value: -1 (left) to +1 (right)
 void widget_draw_pan_knob(cairo_t *cr, int cx, int cy, int radius,
                           float value);

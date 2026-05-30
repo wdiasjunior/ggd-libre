@@ -3,12 +3,13 @@
 #include <string.h>
 
 #define STATE_MAGIC 0x47474431  // "GGD1"
-#define STATE_VERSION 2
+#define STATE_VERSION 4
 
 typedef struct {
     uint32_t magic;
     uint32_t version;
     float    master_gain_db;
+    float    tab_master_db[TAB_COUNT];
     int32_t  kick_size;
     int32_t  snare_type;
     int32_t  tom_head[4];
@@ -54,6 +55,8 @@ bool state_save(const struct ggd_plugin *plug, const clap_ostream_t *stream) {
     state.magic = STATE_MAGIC;
     state.version = STATE_VERSION;
     state.master_gain_db = plug->engine.master_gain_db;
+    for (int t = 0; t < TAB_COUNT; t++)
+        state.tab_master_db[t] = plug->engine.tab_master_db[t];
     state.kick_size = plug->kick_size;
     state.snare_type = plug->snare_type;
     for (int i = 0; i < 4; i++) state.tom_head[i] = plug->tom_head[i];
@@ -85,6 +88,10 @@ bool state_load(struct ggd_plugin *plug, const clap_istream_t *stream) {
 
     plug->engine.master_gain_db = state.master_gain_db;
     engine_update_master(&plug->engine);
+    for (int t = 0; t < TAB_COUNT; t++) {
+        plug->engine.tab_master_db[t] = state.tab_master_db[t];
+        engine_update_tab_master(&plug->engine, (GuiTab)t);
+    }
 
     plug->kick_size = state.kick_size;
     plug->snare_type = state.snare_type;

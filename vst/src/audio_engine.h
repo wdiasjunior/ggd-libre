@@ -38,6 +38,8 @@ typedef struct {
     ChannelParams channels[MIXER_CHANNEL_COUNT];
     float        master_gain_db;
     float        master_gain_linear;
+    float        tab_master_db[TAB_COUNT];
+    float        tab_master_linear[TAB_COUNT];
     bool         any_solo;
     float        sample_rate;
     float        choke_fade_samples;
@@ -52,6 +54,7 @@ void engine_render(AudioEngine *engine, const SampleBank *bank,
                    float *out_l, float *out_r, uint32_t num_frames);
 void engine_update_channel(AudioEngine *engine, MixerChannel ch);
 void engine_update_master(AudioEngine *engine);
+void engine_update_tab_master(AudioEngine *engine, GuiTab tab);
 void engine_update_solo_state(AudioEngine *engine);
 
 #endif

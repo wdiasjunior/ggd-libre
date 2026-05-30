@@ -30,9 +30,9 @@ float fader_y_to_value(int y, int fader_y, int fader_h) {
     return v;
 }
 
-void widget_draw_fader(cairo_t *cr, int x, int y, int w, int h,
-                       float value, const char *label, const char *value_text) {
-    // Track background
+static void draw_fader_impl(cairo_t *cr, int x, int y, int w, int h,
+                            float value, const char *label, const char *value_text,
+                            double fr, double fg, double fb) {
     int track_w = 6;
     int track_x = x + (w - track_w) / 2;
     int track_y = y + 20;
@@ -42,9 +42,8 @@ void widget_draw_fader(cairo_t *cr, int x, int y, int w, int h,
     cairo_rectangle(cr, track_x, track_y, track_w, track_h);
     cairo_fill(cr);
 
-    // Filled portion
     int fill_h = (int)(value * track_h);
-    cairo_set_source_rgb(cr, COL_FADER_FG_R, COL_FADER_FG_G, COL_FADER_FG_B);
+    cairo_set_source_rgb(cr, fr, fg, fb);
     cairo_rectangle(cr, track_x, track_y + track_h - fill_h, track_w, fill_h);
     cairo_fill(cr);
 
@@ -57,15 +56,25 @@ void widget_draw_fader(cairo_t *cr, int x, int y, int w, int h,
     cairo_rectangle(cr, handle_x, handle_y, handle_w, handle_h);
     cairo_fill(cr);
 
-    // Label at bottom
     cairo_set_source_rgb(cr, COL_TEXT_R, COL_TEXT_G, COL_TEXT_B);
     widget_draw_text_centered(cr, x, y + h - 5, w, label, 10);
 
-    // Value text above fader
     if (value_text) {
         cairo_set_source_rgb(cr, 0.6, 0.6, 0.6);
         widget_draw_text_centered(cr, x, y + 14, w, value_text, 9);
     }
+}
+
+void widget_draw_fader(cairo_t *cr, int x, int y, int w, int h,
+                       float value, const char *label, const char *value_text) {
+    draw_fader_impl(cr, x, y, w, h, value, label, value_text,
+                    COL_FADER_FG_R, COL_FADER_FG_G, COL_FADER_FG_B);
+}
+
+void widget_draw_fader_colored(cairo_t *cr, int x, int y, int w, int h,
+                               float value, const char *label, const char *value_text,
+                               double fr, double fg, double fb) {
+    draw_fader_impl(cr, x, y, w, h, value, label, value_text, fr, fg, fb);
 }
 
 void widget_draw_pan_knob(cairo_t *cr, int cx, int cy, int radius,

@@ -21,6 +21,10 @@ void engine_init(AudioEngine *engine, float sample_rate) {
     }
     engine->master_gain_db = 0.0f;
     engine->master_gain_linear = 1.0f;
+    for (int t = 0; t < TAB_COUNT; t++) {
+        engine->tab_master_db[t] = 0.0f;
+        engine->tab_master_linear[t] = 1.0f;
+    }
 }
 
 void engine_update_channel(AudioEngine *engine, MixerChannel ch) {
@@ -33,6 +37,10 @@ void engine_update_channel(AudioEngine *engine, MixerChannel ch) {
 
 void engine_update_master(AudioEngine *engine) {
     engine->master_gain_linear = db_to_linear(engine->master_gain_db);
+}
+
+void engine_update_tab_master(AudioEngine *engine, GuiTab tab) {
+    engine->tab_master_linear[tab] = db_to_linear(engine->tab_master_db[tab]);
 }
 
 void engine_update_solo_state(AudioEngine *engine) {
@@ -135,6 +143,7 @@ void engine_render(AudioEngine *engine, const SampleBank *bank,
         if (!v->active) continue;
 
         const ArticulationSamples *art = &bank->articulations[v->articulation_index];
+        float tab_gain = engine->tab_master_linear[drum_type_tab(v->drum_type)];
 
         for (uint32_t i = 0; i < num_frames; i++) {
             uint32_t pos = v->playback_pos + i;
@@ -168,7 +177,7 @@ void engine_render(AudioEngine *engine, const SampleBank *bank,
 
                 float sample = wav_sample_at(&buf->wav, pos);
                 float phase = ch->phase_invert ? -1.0f : 1.0f;
-                sample *= voice_fade * ch->gain_linear * phase;
+                sample *= voice_fade * tab_gain * ch->gain_linear * phase;
 
                 out_l[i] += sample * ch->pan_l;
                 out_r[i] += sample * ch->pan_r;

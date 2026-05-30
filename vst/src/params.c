@@ -12,6 +12,8 @@ static void build_id_table(void) {
     if (s_ids_built) return;
     int idx = 0;
     s_param_ids[idx++] = PARAM_MASTER_GAIN;
+    for (int t = 0; t < TAB_COUNT; t++)
+        s_param_ids[idx++] = PARAM_TAB_MASTER_BASE + t;
     for (int ch = 0; ch < MIXER_CHANNEL_COUNT; ch++) {
         for (int p = 0; p < PARAM_CH_COUNT; p++) {
             s_param_ids[idx++] = param_channel_id((MixerChannel)ch, p);
@@ -60,6 +62,18 @@ bool params_get_info(uint32_t param_index, clap_param_info_t *info) {
 
     if (id == PARAM_MASTER_GAIN) {
         strncpy(info->name, "Master Gain", CLAP_NAME_SIZE);
+        strncpy(info->module, "Master", CLAP_PATH_SIZE);
+        info->min_value = -80.0;
+        info->max_value = 12.0;
+        info->default_value = 0.0;
+        info->flags = CLAP_PARAM_IS_AUTOMATABLE;
+        return true;
+    }
+
+    if (id >= PARAM_TAB_MASTER_BASE && id < PARAM_TAB_MASTER_BASE + TAB_COUNT) {
+        static const char *tab_master_names[] = {"Kick Master", "Snare Master", "Toms Master", "Cymbals Master"};
+        int t = id - PARAM_TAB_MASTER_BASE;
+        strncpy(info->name, tab_master_names[t], CLAP_NAME_SIZE);
         strncpy(info->module, "Master", CLAP_PATH_SIZE);
         info->min_value = -80.0;
         info->max_value = 12.0;
@@ -170,7 +184,8 @@ bool params_get_info(uint32_t param_index, clap_param_info_t *info) {
 
 bool params_value_to_text(uint32_t param_id, double value,
                           char *buf, uint32_t buf_size) {
-    if (param_id == PARAM_MASTER_GAIN) {
+    if (param_id == PARAM_MASTER_GAIN ||
+        (param_id >= PARAM_TAB_MASTER_BASE && param_id < PARAM_TAB_MASTER_BASE + TAB_COUNT)) {
         if (value <= -80.0)
             snprintf(buf, buf_size, "-inf dB");
         else
