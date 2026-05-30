@@ -13,12 +13,11 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
 
     switch (msg) {
     case WM_PAINT: {
-        // Validate the dirty region without using the paint DC.
-        // Cairo draws directly to the window DC obtained via GetDC(),
-        // so we just need to tell Windows the region is clean.
+        if (gui && gui->cr) {
+            gui_draw(gui);  // draws to image surface, then blits in gui_platform_flush
+        }
+        // Validate so Windows stops sending WM_PAINT
         ValidateRect(hwnd, NULL);
-        if (gui && gui->cr)
-            gui_draw(gui);
         return 0;
     }
     case WM_LBUTTONDOWN:
@@ -38,7 +37,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             gui_handle_mouse_move(gui, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
         return 0;
     case WM_ERASEBKGND:
-        // Prevent flicker — we paint the entire surface ourselves
         return 1;
     }
 
@@ -50,11 +48,11 @@ static void register_window_class(void) {
 
     WNDCLASSEXA wc = {0};
     wc.cbSize = sizeof(wc);
-    wc.style = CS_OWNDC;
+    wc.style = 0;
     wc.lpfnWndProc = wnd_proc;
     wc.hInstance = GetModuleHandle(NULL);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = NULL;  // no background brush — we draw everything
+    wc.hbrBackground = NULL;
     wc.lpszClassName = GGD_WND_CLASS;
 
     RegisterClassExA(&wc);
@@ -67,10 +65,6 @@ bool gui_platform_create(PluginGui *gui) {
 }
 
 void gui_platform_destroy(PluginGui *gui) {
-    if (gui->hdc && gui->hwnd) {
-        ReleaseDC(gui->hwnd, gui->hdc);
-        gui->hdc = NULL;
-    }
     if (gui->hwnd) {
         DestroyWindow(gui->hwnd);
         gui->hwnd = NULL;
@@ -89,12 +83,10 @@ bool gui_platform_set_parent(PluginGui *gui, const clap_window_t *window) {
     );
     if (!gui->hwnd) return false;
 
-    // Store gui pointer for WndProc BEFORE any messages can be dispatched
     SetWindowLongPtr(gui->hwnd, GWLP_USERDATA, (LONG_PTR)gui);
 
-    // CS_OWNDC means GetDC returns the same DC every time — safe to hold
-    gui->hdc = GetDC(gui->hwnd);
-    gui->surface = cairo_win32_surface_create(gui->hdc);
+    // Use a Cairo image surface — we blit to screen in gui_platform_flush
+    gui->surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, GUI_WIDTH, GUI_HEIGHT);
     gui->cr = cairo_create(gui->surface);
 
     return true;
@@ -113,14 +105,29 @@ bool gui_platform_hide(PluginGui *gui) {
 }
 
 void gui_platform_flush(PluginGui *gui) {
-    // Cairo with CS_OWNDC draws directly to the window — just flush GDI
-    if (gui->hwnd) GdiFlush();
+    if (!gui->hwnd || !gui->surface) return;
+
+    cairo_surface_flush(gui->surface);
+    unsigned char *data = cairo_image_surface_get_data(gui->surface);
+    int stride = cairo_image_surface_get_stride(gui->surface);
+
+    // Create a DIB from the Cairo ARGB32 image and blit to the window
+    BITMAPINFO bmi = {0};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = GUI_WIDTH;
+    bmi.bmiHeader.biHeight = -GUI_HEIGHT;  // top-down
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    HDC hdc = GetDC(gui->hwnd);
+    SetDIBitsToDevice(hdc, 0, 0, GUI_WIDTH, GUI_HEIGHT,
+                      0, 0, 0, GUI_HEIGHT,
+                      data, &bmi, DIB_RGB_COLORS);
+    ReleaseDC(gui->hwnd, hdc);
 }
 
 void gui_platform_process_events(PluginGui *gui) {
-    // On Windows, the host's message loop dispatches WM_* to our WndProc.
-    // We must NOT pump messages ourselves — that causes reentrancy.
-    // This function is intentionally empty; the timer just triggers a redraw.
     (void)gui;
 }
 
