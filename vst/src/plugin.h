@@ -26,6 +26,8 @@ typedef struct ggd_plugin {
     int tom_head[4];
     int china_size;
     int stack_type;
+    int lcrash_size;
+    int rcrash_size;
 
     // Path to samples (resolved at init)
     char samples_path[1024];

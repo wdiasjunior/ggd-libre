@@ -12,9 +12,9 @@ static void build_id_table(void) {
     if (s_ids_built) return;
     int idx = 0;
     s_param_ids[idx++] = PARAM_MASTER_GAIN;
-    for (int ch = 0; ch < DRUM_CHANNEL_COUNT; ch++) {
+    for (int ch = 0; ch < MIXER_CHANNEL_COUNT; ch++) {
         for (int p = 0; p < PARAM_CH_COUNT; p++) {
-            s_param_ids[idx++] = param_channel_id((DrumChannel)ch, p);
+            s_param_ids[idx++] = param_channel_id((MixerChannel)ch, p);
         }
     }
     for (int v = 0; v < PARAM_VAR_COUNT; v++) {
@@ -44,8 +44,10 @@ int params_id_to_index(uint32_t id) {
 static const char *variant_names_kick[] = {"22x16", "22x20"};
 static const char *variant_names_snare[] = {"High", "Med", "Low", "13\"", "BFSD"};
 static const char *variant_names_tom_head[] = {"Clear", "Coated"};
-static const char *variant_names_china[] = {"Default", "18\""};
-static const char *variant_names_stack[] = {"Default", "Mini"};
+static const char *variant_names_china[] = {"China", "18\" China"};
+static const char *variant_names_stack[] = {"Stack", "Mini Stack"};
+static const char *variant_names_lcrash[] = {"17\" Byz Thin", "18\" Med Byz"};
+static const char *variant_names_rcrash[] = {"20\" Byz Thin", "19\" Med Byz"};
 
 bool params_get_info(uint32_t param_index, clap_param_info_t *info) {
     build_id_table();
@@ -66,10 +68,10 @@ bool params_get_info(uint32_t param_index, clap_param_info_t *info) {
         return true;
     }
 
-    DrumChannel ch;
+    MixerChannel ch;
     int offset;
     if (param_is_channel(id, &ch, &offset)) {
-        const char *ch_name = DRUM_CHANNEL_NAMES[ch];
+        const char *ch_name = MIXER_CHANNEL_NAMES[ch];
         snprintf(info->module, CLAP_PATH_SIZE, "Channels/%s", ch_name);
 
         switch (offset) {
@@ -151,6 +153,14 @@ bool params_get_info(uint32_t param_index, clap_param_info_t *info) {
             strncpy(info->name, "Stack Type", CLAP_NAME_SIZE);
             info->max_value = 1.0;
             break;
+        case PARAM_VAR_LCRASH_SIZE:
+            strncpy(info->name, "L Crash", CLAP_NAME_SIZE);
+            info->max_value = 1.0;
+            break;
+        case PARAM_VAR_RCRASH_SIZE:
+            strncpy(info->name, "R Crash", CLAP_NAME_SIZE);
+            info->max_value = 1.0;
+            break;
         }
         return true;
     }
@@ -168,7 +178,7 @@ bool params_value_to_text(uint32_t param_id, double value,
         return true;
     }
 
-    DrumChannel ch;
+    MixerChannel ch;
     int offset;
     if (param_is_channel(param_id, &ch, &offset)) {
         switch (offset) {
@@ -226,6 +236,14 @@ bool params_value_to_text(uint32_t param_id, double value,
     case PARAM_VAR_STACK_TYPE:
         if (vi >= 0 && vi <= 1)
             snprintf(buf, buf_size, "%s", variant_names_stack[vi]);
+        return true;
+    case PARAM_VAR_LCRASH_SIZE:
+        if (vi >= 0 && vi <= 1)
+            snprintf(buf, buf_size, "%s", variant_names_lcrash[vi]);
+        return true;
+    case PARAM_VAR_RCRASH_SIZE:
+        if (vi >= 0 && vi <= 1)
+            snprintf(buf, buf_size, "%s", variant_names_rcrash[vi]);
         return true;
     }
 

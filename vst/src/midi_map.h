@@ -6,9 +6,9 @@
 
 typedef struct {
     int          articulation_index;  // into SampleBank
-    DrumChannel  drum_channel;
+    DrumType     drum_type;
     ChokeGroup   choke_group;
-    bool         is_choke_trigger;    // true = this note kills voices in the group
+    bool         is_choke_trigger;
 } NoteVariant;
 
 typedef struct {
@@ -25,6 +25,7 @@ typedef struct {
 bool midi_map_load(MidiMap *map, const SampleBank *bank, const char *json_path);
 void midi_map_update_variants(MidiMap *map, const SampleBank *bank,
                               int kick_size, int snare_type,
-                              int tom_head[4], int china_size, int stack_type);
+                              int tom_head[4], int china_size, int stack_type,
+                              int lcrash_size, int rcrash_size);
 
 #endif

@@ -46,10 +46,12 @@ typedef struct {
     int    height;
 
     // Interaction
-    int    drag_param_id;
-    float  drag_start_value;
-    int    drag_start_y;
-    bool   dragging;
+    int      drag_param_id;
+    float    drag_start_value;
+    int      drag_start_y;
+    bool     dragging;
+    uint32_t last_click_time_ms;
+    int      last_click_hit;   // param id of last clicked fader
 
     // Back-reference
     ggd_plugin_t *plug;

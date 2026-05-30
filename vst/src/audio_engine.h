@@ -21,7 +21,7 @@ typedef struct {
 typedef struct {
     bool     active;
     int      articulation_index;
-    DrumChannel drum_channel;
+    DrumType drum_type;
     int      velocity_layer;
     int      round_robin;
     uint32_t playback_pos;
@@ -29,13 +29,13 @@ typedef struct {
     ChokeGroup choke_group;
     bool     fading_out;
     float    fade_gain;
-    uint32_t max_frame_count; // longest sample across mics
+    uint32_t max_frame_count;
 } Voice;
 
 typedef struct {
     Voice        voices[MAX_VOICES];
     int          rr_counters[MAX_MIDI_NOTES];
-    ChannelParams channels[DRUM_CHANNEL_COUNT];
+    ChannelParams channels[MIXER_CHANNEL_COUNT];
     float        master_gain_db;
     float        master_gain_linear;
     bool         any_solo;
@@ -50,7 +50,7 @@ void engine_note_off(AudioEngine *engine, int midi_note);
 void engine_choke(AudioEngine *engine, ChokeGroup group);
 void engine_render(AudioEngine *engine, const SampleBank *bank,
                    float *out_l, float *out_r, uint32_t num_frames);
-void engine_update_channel(AudioEngine *engine, DrumChannel ch);
+void engine_update_channel(AudioEngine *engine, MixerChannel ch);
 void engine_update_master(AudioEngine *engine);
 void engine_update_solo_state(AudioEngine *engine);
 

@@ -131,7 +131,7 @@ static bool plug_params_get_value(const clap_plugin_t *plugin, clap_id param_id,
         return true;
     }
 
-    DrumChannel ch;
+    MixerChannel ch;
     int offset;
     if (param_is_channel(param_id, &ch, &offset)) {
         const ChannelParams *cp = &plug->engine.channels[ch];
@@ -153,7 +153,9 @@ static bool plug_params_get_value(const clap_plugin_t *plugin, clap_id param_id,
     case PARAM_VAR_TOM3_HEAD:  *out = plug->tom_head[2]; return true;
     case PARAM_VAR_TOM4_HEAD:  *out = plug->tom_head[3]; return true;
     case PARAM_VAR_CHINA_SIZE: *out = plug->china_size; return true;
-    case PARAM_VAR_STACK_TYPE: *out = plug->stack_type; return true;
+    case PARAM_VAR_STACK_TYPE:  *out = plug->stack_type; return true;
+    case PARAM_VAR_LCRASH_SIZE: *out = plug->lcrash_size; return true;
+    case PARAM_VAR_RCRASH_SIZE: *out = plug->rcrash_size; return true;
     }
 
     return false;
@@ -176,7 +178,7 @@ static void apply_param_value(ggd_plugin_t *plug, clap_id param_id, double value
         return;
     }
 
-    DrumChannel ch;
+    MixerChannel ch;
     int offset;
     if (param_is_channel(param_id, &ch, &offset)) {
         ChannelParams *cp = &plug->engine.channels[ch];
@@ -204,13 +206,16 @@ static void apply_param_value(ggd_plugin_t *plug, clap_id param_id, double value
     case PARAM_VAR_TOM3_HEAD:  plug->tom_head[2] = vi; variant_changed = true; break;
     case PARAM_VAR_TOM4_HEAD:  plug->tom_head[3] = vi; variant_changed = true; break;
     case PARAM_VAR_CHINA_SIZE: plug->china_size = vi; variant_changed = true; break;
-    case PARAM_VAR_STACK_TYPE: plug->stack_type = vi; variant_changed = true; break;
+    case PARAM_VAR_STACK_TYPE:  plug->stack_type = vi; variant_changed = true; break;
+    case PARAM_VAR_LCRASH_SIZE: plug->lcrash_size = vi; variant_changed = true; break;
+    case PARAM_VAR_RCRASH_SIZE: plug->rcrash_size = vi; variant_changed = true; break;
     }
 
     if (variant_changed) {
         midi_map_update_variants(&plug->midi_map, &plug->bank,
                                  plug->kick_size, plug->snare_type,
-                                 plug->tom_head, plug->china_size, plug->stack_type);
+                                 plug->tom_head, plug->china_size, plug->stack_type,
+                             plug->lcrash_size, plug->rcrash_size);
     }
 }
 
@@ -342,7 +347,8 @@ static bool plug_init(const struct clap_plugin *plugin) {
     // Set default variants
     midi_map_update_variants(&plug->midi_map, &plug->bank,
                              plug->kick_size, plug->snare_type,
-                             plug->tom_head, plug->china_size, plug->stack_type);
+                             plug->tom_head, plug->china_size, plug->stack_type,
+                             plug->lcrash_size, plug->rcrash_size);
 
     // Start background prefetch of sample data into OS page cache
     sample_bank_prefetch(&plug->bank);

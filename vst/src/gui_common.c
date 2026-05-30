@@ -8,6 +8,20 @@
 #include <string.h>
 #include <math.h>
 
+#ifdef _WIN32
+#include <windows.h>
+static uint32_t get_time_ms(void) { return GetTickCount(); }
+#else
+#include <time.h>
+static uint32_t get_time_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+#endif
+
+#define DOUBLE_CLICK_MS 400
+
 // ---------- Layout Constants ----------
 #define TAB_BAR_H     35
 #define TAB_W         120
@@ -21,47 +35,59 @@
 #define MASTER_X      720
 #define SELECTOR_H    35
 #define SELECTOR_W    120
+#define PREVIEW_BTN_H 20
 
 // ---------- Channel Strip Layout ----------
 
 typedef struct {
-    DrumChannel channel;
+    MixerChannel channel;
     const char *label;
 } StripInfo;
 
 static const StripInfo s_kick_strips[] = {
-    { DRUM_KICK, "KICK" },
+    { CH_KICK_CLOSE, "CLOSE" },
+    { CH_OH,         "OH" },
+    { CH_NEAR_ROOM,  "NEAR ROOM" },
+    { CH_FAR_ROOM,   "FAR ROOM" },
 };
 
 static const StripInfo s_snare_strips[] = {
-    { DRUM_SNARE, "SNARE" },
+    { CH_SNARE_TOP1,   "TOP MIC 1" },
+    { CH_SNARE_TOP2,   "TOP MIC 2" },
+    { CH_SNARE_BOTTOM, "BOTTOM" },
+    { CH_OH,           "OH" },
+    { CH_NEAR_ROOM,    "NEAR ROOM" },
+    { CH_FAR_ROOM,     "FAR ROOM" },
 };
 
 static const StripInfo s_tom_strips[] = {
-    { DRUM_RACK1,  "RACK 1" },
-    { DRUM_RACK2,  "RACK 2" },
-    { DRUM_FLOOR1, "FLOOR 1" },
-    { DRUM_FLOOR2, "FLOOR 2" },
+    { CH_RACK1,      "RACK 1" },
+    { CH_RACK2,      "RACK 2" },
+    { CH_FLOOR1,     "FLOOR 1" },
+    { CH_FLOOR2,     "FLOOR 2" },
+    { CH_OH,         "OH" },
+    { CH_NEAR_ROOM,  "NEAR ROOM" },
+    { CH_FAR_ROOM,   "FAR ROOM" },
 };
 
 static const StripInfo s_cymbal_strips[] = {
-    { DRUM_HIHAT,  "HI-HAT" },
-    { DRUM_LCRASH, "L CRASH" },
-    { DRUM_RCRASH, "R CRASH" },
-    { DRUM_RIDE,   "RIDE" },
-    { DRUM_CHINA,  "CHINA" },
-    { DRUM_STACK,  "STACK" },
-    { DRUM_SPLASH, "SPLASH" },
-    { DRUM_ACCENT, "ACCENT" },
+    { CH_HIHAT,      "HI-HAT" },
+    { CH_RIDE,       "RIDE" },
+    { CH_STACK,      "STACK" },
+    { CH_SPLASH,     "SPLASH" },
+    { CH_CHINA,      "CHINA" },
+    { CH_OH,         "OH" },
+    { CH_NEAR_ROOM,  "NEAR ROOM" },
+    { CH_FAR_ROOM,   "FAR ROOM" },
 };
 
 static const char *tab_names[TAB_COUNT] = { "KICK", "SNARE", "TOMS", "CYMBALS" };
 
 static const StripInfo *get_strips(GuiTab tab, int *count) {
     switch (tab) {
-    case TAB_KICK:    *count = 1; return s_kick_strips;
-    case TAB_SNARE:   *count = 1; return s_snare_strips;
-    case TAB_TOMS:    *count = 4; return s_tom_strips;
+    case TAB_KICK:    *count = 4; return s_kick_strips;
+    case TAB_SNARE:   *count = 6; return s_snare_strips;
+    case TAB_TOMS:    *count = 7; return s_tom_strips;
     case TAB_CYMBALS: *count = 8; return s_cymbal_strips;
     default:          *count = 0; return NULL;
     }
@@ -115,21 +141,35 @@ static void draw_channel_strip(cairo_t *cr, ggd_plugin_t *plug,
                        COL_ACCENT_R, COL_ACCENT_G, COL_ACCENT_B);
 }
 
+static void draw_preview_button(cairo_t *cr, int x, int y, int w, int h) {
+    widget_draw_toggle(cr, x, y, w, h, false, "\xe2\x96\xb6",  // UTF-8 play triangle
+                       COL_ACCENT_R, COL_ACCENT_G, COL_ACCENT_B);
+}
+
+static void draw_selector_with_preview(cairo_t *cr, int x, int *y,
+                                       const char *label, const char *value) {
+    draw_preview_button(cr, x, *y, SELECTOR_W, PREVIEW_BTN_H);
+    *y += PREVIEW_BTN_H + 3;
+    widget_draw_selector(cr, x, *y, SELECTOR_W, SELECTOR_H, label, value);
+}
+
 static void draw_variant_selectors(cairo_t *cr, ggd_plugin_t *plug, GuiTab tab) {
     int sel_x = 10;
-    int sel_y = GUI_HEIGHT - SELECTOR_H - 10;
+    int sel_y = GUI_HEIGHT - SELECTOR_H - PREVIEW_BTN_H - 13;
 
     switch (tab) {
     case TAB_KICK: {
         const char *sizes[] = {"22x16", "22x20"};
-        widget_draw_selector(cr, sel_x, sel_y, SELECTOR_W, SELECTOR_H,
-                             "Kick Size", sizes[plug->kick_size % 2]);
+        int y = sel_y;
+        draw_selector_with_preview(cr, sel_x, &y,
+                                   "Kick Size", sizes[plug->kick_size % 2]);
         break;
     }
     case TAB_SNARE: {
         const char *types[] = {"High", "Med", "Low", "13\"", "BFSD"};
-        widget_draw_selector(cr, sel_x, sel_y, SELECTOR_W, SELECTOR_H,
-                             "Snare Type", types[plug->snare_type % 5]);
+        int y = sel_y;
+        draw_selector_with_preview(cr, sel_x, &y,
+                                   "Snare Type", types[plug->snare_type % 5]);
         break;
     }
     case TAB_TOMS: {
@@ -137,19 +177,30 @@ static void draw_variant_selectors(cairo_t *cr, ggd_plugin_t *plug, GuiTab tab) 
         for (int i = 0; i < 4; i++) {
             char label[32];
             snprintf(label, sizeof(label), "Tom %d", i + 1);
-            widget_draw_selector(cr, sel_x + i * (SELECTOR_W + 10), sel_y,
-                                 SELECTOR_W, SELECTOR_H,
-                                 label, heads[plug->tom_head[i] % 2]);
+            int y = sel_y;
+            draw_selector_with_preview(cr, sel_x + i * (SELECTOR_W + 10), &y,
+                                       label, heads[plug->tom_head[i] % 2]);
         }
         break;
     }
     case TAB_CYMBALS: {
-        const char *china[] = {"Default", "18\""};
-        const char *stack[] = {"Default", "Mini"};
-        widget_draw_selector(cr, sel_x, sel_y, SELECTOR_W, SELECTOR_H,
-                             "China", china[plug->china_size % 2]);
-        widget_draw_selector(cr, sel_x + SELECTOR_W + 10, sel_y, SELECTOR_W, SELECTOR_H,
-                             "Stack", stack[plug->stack_type % 2]);
+        const char *lcrash[] = {"17\" Byz Thin", "18\" Med Byz"};
+        const char *rcrash[] = {"20\" Byz Thin", "19\" Med Byz"};
+        const char *china[] = {"China", "18\" China"};
+        const char *stack[] = {"Stack", "Mini Stack"};
+        int sx = sel_x;
+        for (int i = 0; i < 4; i++) {
+            const char *label, *value;
+            switch (i) {
+            case 0: label = "L Crash"; value = lcrash[plug->lcrash_size % 2]; break;
+            case 1: label = "R Crash"; value = rcrash[plug->rcrash_size % 2]; break;
+            case 2: label = "China";   value = china[plug->china_size % 2]; break;
+            default: label = "Stack";  value = stack[plug->stack_type % 2]; break;
+            }
+            int y = sel_y;
+            draw_selector_with_preview(cr, sx, &y, label, value);
+            sx += SELECTOR_W + 10;
+        }
         break;
     }
     default: break;
@@ -214,6 +265,7 @@ void gui_draw(PluginGui *gui) {
 typedef enum {
     HIT_NONE = 0, HIT_TAB, HIT_FADER, HIT_MUTE, HIT_SOLO,
     HIT_PHASE, HIT_STEREO, HIT_PAN_KNOB, HIT_MASTER_FADER, HIT_SELECTOR,
+    HIT_PREVIEW,
 } HitType;
 
 typedef struct {
@@ -273,18 +325,28 @@ static HitResult hit_test(PluginGui *gui, int mx, int my) {
             { r.type = HIT_PAN_KNOB; r.strip_index = i; return r; }
     }
 
-    int sel_y = GUI_HEIGHT - SELECTOR_H - 10;
-    if (my >= sel_y && my < sel_y + SELECTOR_H) {
+    // Preview buttons and selectors
+    int preview_y = GUI_HEIGHT - SELECTOR_H - PREVIEW_BTN_H - 13;
+    int sel_y = preview_y + PREVIEW_BTN_H + 3;
+    if (my >= preview_y && my < sel_y + SELECTOR_H) {
         int num = 0;
         switch (gui->active_tab) {
         case TAB_KICK: num = 1; break; case TAB_SNARE: num = 1; break;
-        case TAB_TOMS: num = 4; break; case TAB_CYMBALS: num = 2; break;
+        case TAB_TOMS: num = 4; break; case TAB_CYMBALS: num = 4; break;
         default: break;
         }
         for (int i = 0; i < num; i++) {
             int sx = 10 + i * (SELECTOR_W + 10);
-            if (mx >= sx && mx < sx + SELECTOR_W)
-                { r.type = HIT_SELECTOR; r.selector_idx = i; return r; }
+            if (mx >= sx && mx < sx + SELECTOR_W) {
+                if (my < sel_y) {
+                    r.type = HIT_PREVIEW;
+                    r.selector_idx = i;
+                } else {
+                    r.type = HIT_SELECTOR;
+                    r.selector_idx = i;
+                }
+                return r;
+            }
         }
     }
 
@@ -299,7 +361,7 @@ static void send_param_change(ggd_plugin_t *plug) {
 }
 
 static void toggle_param(ggd_plugin_t *plug, clap_id param_id) {
-    DrumChannel ch;
+    MixerChannel ch;
     int offset;
     if (param_is_channel(param_id, &ch, &offset)) {
         ChannelParams *cp = &plug->engine.channels[ch];
@@ -313,6 +375,37 @@ static void toggle_param(ggd_plugin_t *plug, clap_id param_id) {
     send_param_change(plug);
 }
 
+// Map (tab, selector_index) to a MIDI note for preview playback
+static int preview_midi_note(GuiTab tab, int sel_idx) {
+    switch (tab) {
+    case TAB_KICK:   return 24;  // Kick Main Hit
+    case TAB_SNARE:  return 26;  // Snare Hit
+    case TAB_TOMS:
+        switch (sel_idx) {
+        case 0: return 33;  // Hi Tom
+        case 1: return 35;  // Mid Tom 1
+        case 2: return 37;  // Mid Tom 2
+        case 3: return 39;  // Floor Tom
+        }
+        return -1;
+    case TAB_CYMBALS:
+        switch (sel_idx) {
+        case 0: return 62;  // L Crash Hit
+        case 1: return 67;  // R Crash Hit
+        case 2: return 76;  // China Main Hit
+        case 3: return 81;  // Stack Tight Hit
+        }
+        return -1;
+    default: return -1;
+    }
+}
+
+static void play_preview(ggd_plugin_t *plug, GuiTab tab, int sel_idx) {
+    int note = preview_midi_note(tab, sel_idx);
+    if (note >= 0)
+        engine_note_on(&plug->engine, &plug->bank, &plug->midi_map, note, 0.8f);
+}
+
 static void cycle_selector(ggd_plugin_t *plug, GuiTab tab, int sel_idx) {
     switch (tab) {
     case TAB_KICK:    plug->kick_size = (plug->kick_size + 1) % 2; break;
@@ -322,14 +415,17 @@ static void cycle_selector(ggd_plugin_t *plug, GuiTab tab, int sel_idx) {
             plug->tom_head[sel_idx] = (plug->tom_head[sel_idx] + 1) % 2;
         break;
     case TAB_CYMBALS:
-        if (sel_idx == 0) plug->china_size = (plug->china_size + 1) % 2;
-        else if (sel_idx == 1) plug->stack_type = (plug->stack_type + 1) % 2;
+        if (sel_idx == 0)      plug->lcrash_size = (plug->lcrash_size + 1) % 2;
+        else if (sel_idx == 1) plug->rcrash_size = (plug->rcrash_size + 1) % 2;
+        else if (sel_idx == 2) plug->china_size = (plug->china_size + 1) % 2;
+        else if (sel_idx == 3) plug->stack_type = (plug->stack_type + 1) % 2;
         break;
     default: break;
     }
     midi_map_update_variants(&plug->midi_map, &plug->bank,
                              plug->kick_size, plug->snare_type,
-                             plug->tom_head, plug->china_size, plug->stack_type);
+                             plug->tom_head, plug->china_size, plug->stack_type,
+                             plug->lcrash_size, plug->rcrash_size);
     send_param_change(plug);
 }
 
@@ -340,6 +436,8 @@ void gui_handle_mouse_down(PluginGui *gui, int mx, int my) {
     int strip_count;
     const StripInfo *strips = get_strips(gui->active_tab, &strip_count);
 
+    uint32_t now = get_time_ms();
+
     switch (hit.type) {
     case HIT_TAB:
         gui->active_tab = (GuiTab)hit.strip_index;
@@ -347,8 +445,19 @@ void gui_handle_mouse_down(PluginGui *gui, int mx, int my) {
 
     case HIT_FADER:
         if (hit.strip_index < strip_count) {
+            int pid = (int)param_channel_id(strips[hit.strip_index].channel, PARAM_CH_GAIN);
+            // Double-click: reset to 0 dB
+            if (gui->last_click_hit == pid && (now - gui->last_click_time_ms) < DOUBLE_CLICK_MS) {
+                gui->plug->engine.channels[strips[hit.strip_index].channel].gain_db = 0.0f;
+                engine_update_channel(&gui->plug->engine, strips[hit.strip_index].channel);
+                gui->last_click_hit = -1;
+                break;
+            }
+            gui->last_click_hit = pid;
+            gui->last_click_time_ms = now;
+
             gui->dragging = true;
-            gui->drag_param_id = param_channel_id(strips[hit.strip_index].channel, PARAM_CH_GAIN);
+            gui->drag_param_id = pid;
             gui->drag_start_y = my;
             gui->drag_start_value = db_to_fader(
                 gui->plug->engine.channels[strips[hit.strip_index].channel].gain_db);
@@ -359,6 +468,16 @@ void gui_handle_mouse_down(PluginGui *gui, int mx, int my) {
         break;
 
     case HIT_MASTER_FADER:
+        // Double-click: reset to 0 dB
+        if (gui->last_click_hit == PARAM_MASTER_GAIN && (now - gui->last_click_time_ms) < DOUBLE_CLICK_MS) {
+            gui->plug->engine.master_gain_db = 0.0f;
+            engine_update_master(&gui->plug->engine);
+            gui->last_click_hit = -1;
+            break;
+        }
+        gui->last_click_hit = PARAM_MASTER_GAIN;
+        gui->last_click_time_ms = now;
+
         gui->dragging = true;
         gui->drag_param_id = PARAM_MASTER_GAIN;
         gui->drag_start_y = my;
@@ -400,6 +519,10 @@ void gui_handle_mouse_down(PluginGui *gui, int mx, int my) {
         cycle_selector(gui->plug, gui->active_tab, hit.selector_idx);
         break;
 
+    case HIT_PREVIEW:
+        play_preview(gui->plug, gui->active_tab, hit.selector_idx);
+        break;
+
     default: break;
     }
 
@@ -415,7 +538,7 @@ void gui_handle_mouse_move(PluginGui *gui, int mx, int my) {
     (void)mx;
     if (!gui->dragging) return;
 
-    DrumChannel ch;
+    MixerChannel ch;
     int offset;
 
     if (gui->drag_param_id == PARAM_MASTER_GAIN) {

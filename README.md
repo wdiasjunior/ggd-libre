@@ -1,6 +1,10 @@
 # ggd-libre
 
-ggd-libre
+Reverse engineered CLAP Plugin that reimplements the GGD Kontakt drum plugin.
+
+If you like me use Linux and are interested in music production, you have likely already come across the massive challenge that is using Kontakt libraries through Wine. This project was built with the sole purpose of extracting the sample files from a legally purchased copy of GGD Matt Halpern Signature Pack and use it in a native plugin that runs on Linux and Windows.
+
+ggd-libre has no affiliation to GGD and I do condone piracy of their products. This project simply exists as a way to use the plugin you paid for without relying on proprietary Kontakt bullshit and DRM.
 
 ---
 
@@ -40,8 +44,47 @@ I want to rename the vst directory to plugin and make sure git knows I just rena
 ---
 ## improvements
 
-looking at the screenshots in the root of the repo, we can see that every tab has sliders/faders for the room samples, which are currently missing from the clap plugin
+looking at the screenshots in the root of the repo, we can see that every tab (kick, snare, toms, cymbals) has sliders/faders for the room samples, which are currently missing from the clap plugin
+
+kick tab
+- close mic
+- oh
+- near room
+- far room
+
+snare tab
+- top mic 1
+- top mic 2
+- bottom mic
+- oh
+- near room
+- far room
+
+toms tab
+- rack 1
+- rack 2
+- floor 1
+- floor 2
+- oh
+- near room
+- far room
+
+cymbals tab
+- hi-hat
+- ride
+- stack
+- splash
+- china
+- oh
+- near room
+- far room
 
 I am assuming that when I hit a snare all snare related samples should be played, and I would have individual controls for the volume of each snare mic.
 
 I don't see the sliders but is this implemented multiple sample playback feature implemented?
+
+on top of this, just like the kick and snare tabs have a size selector, the screenshots show that every tom and cymbal piece have selectors as well. and for the size selector, I noticed that only the kick selector seems to have an effect on the sound, while the snare all options sound identical so double check that whilst implemententing the other tabs drum piece size/sample seletor
+
+---
+
+can you add a way to reset the fader levels to 0db by double clicking it?

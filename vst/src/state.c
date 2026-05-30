@@ -3,7 +3,7 @@
 #include <string.h>
 
 #define STATE_MAGIC 0x47474431  // "GGD1"
-#define STATE_VERSION 1
+#define STATE_VERSION 2
 
 typedef struct {
     uint32_t magic;
@@ -14,6 +14,8 @@ typedef struct {
     int32_t  tom_head[4];
     int32_t  china_size;
     int32_t  stack_type;
+    int32_t  lcrash_size;
+    int32_t  rcrash_size;
     struct {
         float gain_db;
         float pan;
@@ -21,7 +23,7 @@ typedef struct {
         uint8_t solo;
         uint8_t phase_invert;
         uint8_t stereo_mode;
-    } channels[DRUM_CHANNEL_COUNT];
+    } channels[MIXER_CHANNEL_COUNT];
 } StateData;
 
 static int64_t stream_write_all(const clap_ostream_t *stream, const void *buf, uint64_t size) {
@@ -57,8 +59,10 @@ bool state_save(const struct ggd_plugin *plug, const clap_ostream_t *stream) {
     for (int i = 0; i < 4; i++) state.tom_head[i] = plug->tom_head[i];
     state.china_size = plug->china_size;
     state.stack_type = plug->stack_type;
+    state.lcrash_size = plug->lcrash_size;
+    state.rcrash_size = plug->rcrash_size;
 
-    for (int i = 0; i < DRUM_CHANNEL_COUNT; i++) {
+    for (int i = 0; i < MIXER_CHANNEL_COUNT; i++) {
         const ChannelParams *ch = &plug->engine.channels[i];
         state.channels[i].gain_db = ch->gain_db;
         state.channels[i].pan = ch->pan;
@@ -87,8 +91,10 @@ bool state_load(struct ggd_plugin *plug, const clap_istream_t *stream) {
     for (int i = 0; i < 4; i++) plug->tom_head[i] = state.tom_head[i];
     plug->china_size = state.china_size;
     plug->stack_type = state.stack_type;
+    plug->lcrash_size = state.lcrash_size;
+    plug->rcrash_size = state.rcrash_size;
 
-    for (int i = 0; i < DRUM_CHANNEL_COUNT; i++) {
+    for (int i = 0; i < MIXER_CHANNEL_COUNT; i++) {
         ChannelParams *ch = &plug->engine.channels[i];
         ch->gain_db = state.channels[i].gain_db;
         ch->pan = state.channels[i].pan;
@@ -96,12 +102,13 @@ bool state_load(struct ggd_plugin *plug, const clap_istream_t *stream) {
         ch->solo = state.channels[i].solo != 0;
         ch->phase_invert = state.channels[i].phase_invert != 0;
         ch->stereo_mode = state.channels[i].stereo_mode != 0;
-        engine_update_channel(&plug->engine, (DrumChannel)i);
+        engine_update_channel(&plug->engine, (MixerChannel)i);
     }
     engine_update_solo_state(&plug->engine);
 
     midi_map_update_variants(&plug->midi_map, &plug->bank,
                              plug->kick_size, plug->snare_type,
-                             plug->tom_head, plug->china_size, plug->stack_type);
+                             plug->tom_head, plug->china_size, plug->stack_type,
+                             plug->lcrash_size, plug->rcrash_size);
     return true;
 }
