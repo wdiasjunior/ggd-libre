@@ -443,11 +443,15 @@ void gui_handle_mouse_move(PluginGui *gui, int mx, int my) {
 
 static bool gui_is_api_supported(const clap_plugin_t *plugin, const char *api, bool is_floating) {
     (void)plugin; (void)is_floating;
+    bool supported;
 #ifdef _WIN32
-    return !strcmp(api, CLAP_WINDOW_API_WIN32);
+    supported = !strcmp(api, CLAP_WINDOW_API_WIN32);
 #else
-    return !strcmp(api, CLAP_WINDOW_API_X11);
+    supported = !strcmp(api, CLAP_WINDOW_API_X11);
 #endif
+    fprintf(stderr, "ggd-libre: gui_is_api_supported api='%s' floating=%d -> %d\n",
+            api, is_floating, supported);
+    return supported;
 }
 
 static bool gui_get_preferred_api(const clap_plugin_t *plugin, const char **api, bool *is_floating) {
@@ -479,13 +483,17 @@ static bool gui_create(const clap_plugin_t *plugin, const char *api, bool is_flo
     gui->active_tab = TAB_KICK;
     gui->drag_param_id = -1;
 
+    fprintf(stderr, "ggd-libre: gui_create api='%s'\n", api);
+
     if (!gui_platform_create(gui)) {
+        fprintf(stderr, "ggd-libre: gui_platform_create failed\n");
         free(gui);
         return false;
     }
 
     gui->created = true;
     plug->gui = gui;
+    fprintf(stderr, "ggd-libre: gui_create OK\n");
     return true;
 }
 
@@ -536,8 +544,12 @@ static bool gui_set_size(const clap_plugin_t *p, uint32_t w, uint32_t h) {
 static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *window) {
     ggd_plugin_t *plug = plugin->plugin_data;
     PluginGui *gui = plug->gui;
-    if (!gui) return false;
-    return gui_platform_set_parent(gui, window);
+    if (!gui) { fprintf(stderr, "ggd-libre: gui_set_parent: no gui\n"); return false; }
+    fprintf(stderr, "ggd-libre: gui_set_parent called\n");
+    bool ok = gui_platform_set_parent(gui, window);
+    fprintf(stderr, "ggd-libre: gui_set_parent %s (surface=%p cr=%p)\n",
+            ok ? "OK" : "FAILED", (void*)gui->surface, (void*)gui->cr);
+    return ok;
 }
 
 static bool gui_set_transient(const clap_plugin_t *p, const clap_window_t *w) {
@@ -548,12 +560,18 @@ static void gui_suggest_title(const clap_plugin_t *p, const char *t) { (void)p; 
 static bool gui_show(const clap_plugin_t *plugin) {
     ggd_plugin_t *plug = plugin->plugin_data;
     PluginGui *gui = plug->gui;
-    if (!gui) return false;
+    if (!gui) { fprintf(stderr, "ggd-libre: gui_show: no gui\n"); return false; }
+    fprintf(stderr, "ggd-libre: gui_show called\n");
 
-    if (!gui_platform_show(gui)) return false;
+    if (!gui_platform_show(gui)) {
+        fprintf(stderr, "ggd-libre: gui_platform_show failed\n");
+        return false;
+    }
     gui->visible = true;
     gui_register_callbacks(plug, gui);
+    fprintf(stderr, "ggd-libre: gui_show: timer_registered=%d\n", gui->timer_registered);
     gui_draw(gui);
+    fprintf(stderr, "ggd-libre: gui_show OK\n");
     return true;
 }
 

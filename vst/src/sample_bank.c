@@ -1,5 +1,4 @@
 #include "sample_bank.h"
-#include "wav_reader.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,29 +24,21 @@ static int find_or_create_articulation(SampleBank *bank, const char *prefix) {
     return idx;
 }
 
-// Parse filename: {MicDir}_{DrumName}_dyn{N}_rr{M}.wav
-// The mic dir prefix is stripped since we know which mic dir we're scanning.
-// So we parse: {ArticulationPrefix}_dyn{N}_rr{M}.wav
 static bool parse_sample_filename(const char *mic_dir_name, const char *filename,
                                   char *out_prefix, int *out_dyn, int *out_rr) {
-    // filename starts with mic_dir_name + "_"
     size_t mic_len = strlen(mic_dir_name);
     if (strncmp(filename, mic_dir_name, mic_len) != 0 || filename[mic_len] != '_')
         return false;
 
     const char *rest = filename + mic_len + 1;
-
-    // Find _dyn{N}_rr{M}.wav from the end
     const char *dyn_ptr = strstr(rest, "_dyn");
     if (!dyn_ptr) return false;
 
-    // Copy prefix (everything before _dyn)
     size_t prefix_len = dyn_ptr - rest;
     if (prefix_len >= 128) return false;
     memcpy(out_prefix, rest, prefix_len);
     out_prefix[prefix_len] = '\0';
 
-    // Parse _dyn{N}_rr{M}.wav
     int dyn, rr;
     if (sscanf(dyn_ptr, "_dyn%d_rr%d", &dyn, &rr) != 2)
         return false;
@@ -86,22 +77,18 @@ static bool load_mic_directory(SampleBank *bank, MicPosition mic, const char *di
         if (dyn < 1 || dyn > MAX_VELOCITY_LAYERS || rr < 1 || rr > MAX_ROUND_ROBINS)
             continue;
 
-        // Build full path
         char filepath[1024];
         snprintf(filepath, sizeof(filepath), "%s/%s", dir_path, ent->d_name);
 
-        WavFile wav;
-        if (!wav_read(filepath, &wav)) {
-            fprintf(stderr, "ggd-libre: failed to read %s\n", filepath);
+        SampleBuffer *buf = &ms->buffers[dyn - 1][rr - 1];
+        if (!wav_open(filepath, &buf->wav)) {
+            fprintf(stderr, "ggd-libre: failed to mmap %s\n", filepath);
             continue;
         }
-
-        SampleBuffer *buf = &ms->buffers[dyn - 1][rr - 1];
-        buf->data = wav.samples;
-        buf->frame_count = wav.num_frames;
+        buf->loaded = true;
 
         if (bank->sample_rate == 0)
-            bank->sample_rate = wav.sample_rate;
+            bank->sample_rate = buf->wav.sample_rate;
 
         if (dyn > ms->num_velocity_layers) ms->num_velocity_layers = dyn;
         if (rr > ms->num_round_robins) ms->num_round_robins = rr;
@@ -114,7 +101,7 @@ static bool load_mic_directory(SampleBank *bank, MicPosition mic, const char *di
     }
 
     closedir(d);
-    fprintf(stderr, "ggd-libre: loaded %d samples from %s\n", loaded, mic_name);
+    fprintf(stderr, "ggd-libre: mapped %d samples from %s\n", loaded, mic_name);
     return true;
 }
 
@@ -131,7 +118,7 @@ bool sample_bank_load(SampleBank *bank, const char *wav_base_dir) {
         load_mic_directory(bank, (MicPosition)mic, dir_path);
     }
 
-    fprintf(stderr, "ggd-libre: %d articulations loaded\n", bank->num_articulations);
+    fprintf(stderr, "ggd-libre: %d articulations mapped\n", bank->num_articulations);
     return bank->num_articulations > 0;
 }
 
@@ -142,7 +129,8 @@ void sample_bank_free(SampleBank *bank) {
             MicSampleSet *ms = &bank->articulations[a].mics[m];
             for (int v = 0; v < MAX_VELOCITY_LAYERS; v++) {
                 for (int r = 0; r < MAX_ROUND_ROBINS; r++) {
-                    free(ms->buffers[v][r].data);
+                    if (ms->buffers[v][r].loaded)
+                        wav_close(&ms->buffers[v][r].wav);
                 }
             }
         }

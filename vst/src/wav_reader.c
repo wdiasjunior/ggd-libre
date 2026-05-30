@@ -3,121 +3,123 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool read_u32(FILE *f, uint32_t *out) {
-    uint8_t buf[4];
-    if (fread(buf, 1, 4, f) != 4) return false;
-    *out = buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24);
-    return true;
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
+static uint32_t read_le32(const uint8_t *p) {
+    return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-static bool read_u16(FILE *f, uint16_t *out) {
-    uint8_t buf[2];
-    if (fread(buf, 1, 2, f) != 2) return false;
-    *out = buf[0] | (buf[1] << 8);
-    return true;
+static uint16_t read_le16(const uint8_t *p) {
+    return p[0] | (p[1] << 8);
 }
 
-bool wav_read(const char *path, WavFile *out) {
+bool wav_open(const char *path, WavFile *out) {
     memset(out, 0, sizeof(*out));
 
-    FILE *f = fopen(path, "rb");
-    if (!f) return false;
+#ifdef _WIN32
+    // Open file
+    HANDLE hFile = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) return false;
 
-    // RIFF header
-    char riff_id[4];
-    uint32_t file_size;
-    char wave_id[4];
-    if (fread(riff_id, 1, 4, f) != 4 || memcmp(riff_id, "RIFF", 4) != 0) goto fail;
-    if (!read_u32(f, &file_size)) goto fail;
-    if (fread(wave_id, 1, 4, f) != 4 || memcmp(wave_id, "WAVE", 4) != 0) goto fail;
+    LARGE_INTEGER fsize;
+    if (!GetFileSizeEx(hFile, &fsize)) { CloseHandle(hFile); return false; }
+    size_t file_size = (size_t)fsize.QuadPart;
 
-    uint16_t audio_format = 0, num_channels = 0, bits_per_sample = 0;
-    uint32_t sample_rate = 0;
-    bool found_fmt = false, found_data = false;
-    float *samples = NULL;
-    uint32_t num_frames = 0;
+    HANDLE hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+    if (!hMap) { CloseHandle(hFile); return false; }
 
-    while (!found_data) {
-        char chunk_id[4];
-        uint32_t chunk_size;
-        if (fread(chunk_id, 1, 4, f) != 4) goto fail;
-        if (!read_u32(f, &chunk_size)) goto fail;
+    void *base = MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+    if (!base) { CloseHandle(hMap); CloseHandle(hFile); return false; }
 
-        if (memcmp(chunk_id, "fmt ", 4) == 0) {
-            if (!read_u16(f, &audio_format)) goto fail;
-            if (!read_u16(f, &num_channels)) goto fail;
-            if (!read_u32(f, &sample_rate)) goto fail;
-            uint32_t byte_rate; if (!read_u32(f, &byte_rate)) goto fail;
-            uint16_t block_align; if (!read_u16(f, &block_align)) goto fail;
-            if (!read_u16(f, &bits_per_sample)) goto fail;
-            // Skip any extra fmt bytes
-            if (chunk_size > 16)
-                fseek(f, chunk_size - 16, SEEK_CUR);
-            found_fmt = true;
-        } else if (memcmp(chunk_id, "data", 4) == 0) {
-            if (!found_fmt) goto fail;
+    out->map_base = base;
+    out->map_size = file_size;
+    out->file_handle = hFile;
+    out->map_handle = hMap;
+#else
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return false;
+
+    struct stat st;
+    if (fstat(fd, &st) < 0) { close(fd); return false; }
+    size_t file_size = (size_t)st.st_size;
+
+    void *base = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd); // fd can be closed after mmap
+    if (base == MAP_FAILED) return false;
+
+    out->map_base = base;
+    out->map_size = file_size;
+#endif
+
+    // Parse WAV header from mapped memory
+    const uint8_t *data = (const uint8_t *)base;
+
+    if (file_size < 44) goto fail;
+    if (memcmp(data, "RIFF", 4) != 0) goto fail;
+    if (memcmp(data + 8, "WAVE", 4) != 0) goto fail;
+
+    size_t pos = 12;
+    bool found_fmt = false;
+
+    while (pos + 8 <= file_size) {
+        const uint8_t *chunk = data + pos;
+        uint32_t chunk_size = read_le32(chunk + 4);
+
+        if (memcmp(chunk, "fmt ", 4) == 0 && pos + 8 + chunk_size <= file_size) {
+            if (chunk_size < 16) goto fail;
+            const uint8_t *fmt = chunk + 8;
+            uint16_t audio_format = read_le16(fmt);
             if (audio_format != 1) goto fail; // PCM only
 
-            uint32_t bytes_per_sample = bits_per_sample / 8;
-            uint32_t frame_size = bytes_per_sample * num_channels;
-            num_frames = chunk_size / frame_size;
+            out->num_channels = read_le16(fmt + 2);
+            out->sample_rate = read_le32(fmt + 4);
+            out->bits_per_sample = read_le16(fmt + 14);
+            found_fmt = true;
+        } else if (memcmp(chunk, "data", 4) == 0 && found_fmt) {
+            uint32_t bytes_per_sample = out->bits_per_sample / 8;
+            uint32_t frame_size = bytes_per_sample * out->num_channels;
+            out->num_frames = chunk_size / frame_size;
+            out->pcm_data = chunk + 8;
 
-            samples = malloc(num_frames * num_channels * sizeof(float));
-            if (!samples) goto fail;
+            // Verify the data doesn't extend past the file
+            if ((size_t)(out->pcm_data - data) + chunk_size > file_size)
+                out->num_frames = (uint32_t)((file_size - (out->pcm_data - data)) / frame_size);
 
-            if (bits_per_sample == 24) {
-                uint8_t *raw = malloc(chunk_size);
-                if (!raw) { free(samples); goto fail; }
-                if (fread(raw, 1, chunk_size, f) != chunk_size) {
-                    free(raw); free(samples); goto fail;
-                }
-                for (uint32_t i = 0; i < num_frames * num_channels; i++) {
-                    int32_t val = raw[i*3] | (raw[i*3+1] << 8) | (raw[i*3+2] << 16);
-                    if (val & 0x800000) val |= 0xFF000000; // sign extend
-                    samples[i] = val / 8388608.0f;
-                }
-                free(raw);
-            } else if (bits_per_sample == 16) {
-                uint8_t *raw = malloc(chunk_size);
-                if (!raw) { free(samples); goto fail; }
-                if (fread(raw, 1, chunk_size, f) != chunk_size) {
-                    free(raw); free(samples); goto fail;
-                }
-                for (uint32_t i = 0; i < num_frames * num_channels; i++) {
-                    int16_t val = (int16_t)(raw[i*2] | (raw[i*2+1] << 8));
-                    samples[i] = val / 32768.0f;
-                }
-                free(raw);
-            } else if (bits_per_sample == 32) {
-                // 32-bit float
-                if (fread(samples, sizeof(float), num_frames * num_channels, f)
-                    != num_frames * num_channels) {
-                    free(samples); goto fail;
-                }
-            } else {
-                free(samples); goto fail;
-            }
-            found_data = true;
-        } else {
-            // Skip unknown chunk
-            fseek(f, chunk_size, SEEK_CUR);
+            return true;
         }
+
+        pos += 8 + chunk_size;
+        if (chunk_size & 1) pos++; // WAV chunks are word-aligned
     }
 
-    fclose(f);
-    out->samples = samples;
-    out->num_frames = num_frames;
-    out->sample_rate = sample_rate;
-    out->num_channels = num_channels;
-    return true;
-
 fail:
-    fclose(f);
+    wav_close(out);
     return false;
 }
 
-void wav_free(WavFile *wav) {
-    free(wav->samples);
-    wav->samples = NULL;
+void wav_close(WavFile *wav) {
+    if (!wav->map_base) return;
+
+#ifdef _WIN32
+    UnmapViewOfFile(wav->map_base);
+    if (wav->map_handle) CloseHandle(wav->map_handle);
+    if (wav->file_handle) CloseHandle(wav->file_handle);
+    wav->map_handle = NULL;
+    wav->file_handle = NULL;
+#else
+    munmap(wav->map_base, wav->map_size);
+#endif
+
+    wav->map_base = NULL;
+    wav->pcm_data = NULL;
+    wav->map_size = 0;
     wav->num_frames = 0;
 }

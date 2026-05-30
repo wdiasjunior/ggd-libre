@@ -80,8 +80,8 @@ void engine_note_on(AudioEngine *engine, const SampleBank *bank, const MidiMap *
     for (int m = 0; m < MIC_COUNT; m++) {
         if (!art->mics[m].available) continue;
         const SampleBuffer *buf = &art->mics[m].buffers[layer][rr];
-        if (buf->data && buf->frame_count > max_frames)
-            max_frames = buf->frame_count;
+        if (buf->loaded && buf->wav.num_frames > max_frames)
+            max_frames = buf->wav.num_frames;
     }
     if (max_frames == 0) return;
 
@@ -167,8 +167,8 @@ void engine_render(AudioEngine *engine, const SampleBank *bank,
             for (int m = 0; m < MIC_COUNT; m++) {
                 if (!art->mics[m].available) continue;
                 const SampleBuffer *buf = &art->mics[m].buffers[v->velocity_layer][v->round_robin];
-                if (buf->data && pos < buf->frame_count) {
-                    sample += buf->data[pos];
+                if (buf->loaded && pos < buf->wav.num_frames) {
+                    sample += wav_sample_at(&buf->wav, pos);
                     mic_count++;
                 }
             }

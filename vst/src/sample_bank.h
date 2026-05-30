@@ -2,10 +2,11 @@
 #define GGD_SAMPLE_BANK_H
 
 #include "types.h"
+#include "wav_reader.h"
 
 typedef struct {
-    float   *data;
-    uint32_t frame_count;
+    WavFile  wav;       // memory-mapped WAV file
+    bool     loaded;
 } SampleBuffer;
 
 typedef struct {
