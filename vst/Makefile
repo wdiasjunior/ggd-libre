@@ -26,7 +26,7 @@ CFLAGS = $(COMMON_CFLAGS) -fPIC \
          -I$(LIN_SYSROOT)/include/cairo \
          -I$(LIN_SYSROOT)/include/pixman-1 \
          $(shell pkg-config --cflags x11 2>/dev/null)
-LDFLAGS = -shared -lm \
+LDFLAGS = -shared -lm -lpthread \
           -L$(LIN_SYSROOT)/lib -lcairo -lpixman-1 \
           $(shell pkg-config --libs x11 freetype2 2>/dev/null)
 LIN_SOURCES = $(CORE_SOURCES) src/gui_x11.c

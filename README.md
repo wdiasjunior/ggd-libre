@@ -40,14 +40,6 @@ I want to rename the vst directory to plugin and make sure git knows I just rena
 ---
 ## improvements
 
-some improvements we need to work on:
-
----
-
-loading the plugin takes a long time and all samples are stored in memory, which is not ideal for memory limited machines. how can we optimize this?
-
----
-
 looking at the screenshots in the root of the repo, we can see that every tab has sliders/faders for the room samples, which are currently missing from the clap plugin
 
 I am assuming that when I hit a snare all snare related samples should be played, and I would have individual controls for the volume of each snare mic.

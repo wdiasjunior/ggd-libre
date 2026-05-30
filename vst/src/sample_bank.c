@@ -4,6 +4,14 @@
 #include <string.h>
 #include <dirent.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+#else
+#include <sys/mman.h>
+#include <pthread.h>
+#endif
+
 int sample_bank_find(const SampleBank *bank, const char *prefix) {
     for (int i = 0; i < bank->num_articulations; i++) {
         if (strcmp(bank->articulations[i].prefix, prefix) == 0)
@@ -138,4 +146,78 @@ void sample_bank_free(SampleBank *bank) {
     free(bank->articulations);
     bank->articulations = NULL;
     bank->num_articulations = 0;
+}
+
+// ---------- Background prefetch ----------
+
+// Touch every page in a mapped region to warm the OS page cache.
+// volatile prevents the compiler from optimizing out the reads.
+static void prefetch_region(const void *base, size_t size) {
+    const volatile unsigned char *p = (const volatile unsigned char *)base;
+    volatile unsigned char sink = 0;
+    for (size_t off = 0; off < size; off += 4096)
+        sink += p[off];
+    (void)sink;
+}
+
+static void prefetch_all_samples(SampleBank *bank) {
+    int count = 0;
+    for (int a = 0; a < bank->num_articulations; a++) {
+        for (int m = 0; m < MIC_COUNT; m++) {
+            MicSampleSet *ms = &bank->articulations[a].mics[m];
+            for (int v = 0; v < MAX_VELOCITY_LAYERS; v++) {
+                for (int r = 0; r < MAX_ROUND_ROBINS; r++) {
+                    SampleBuffer *buf = &ms->buffers[v][r];
+                    if (buf->loaded && buf->wav.map_base) {
+                        prefetch_region(buf->wav.map_base, buf->wav.map_size);
+                        count++;
+                    }
+                }
+            }
+        }
+    }
+    fprintf(stderr, "ggd-libre: prefetched %d sample files into page cache\n", count);
+}
+
+#ifdef _WIN32
+static unsigned __stdcall prefetch_thread_func(void *arg) {
+    prefetch_all_samples((SampleBank *)arg);
+    return 0;
+}
+#else
+static void *prefetch_thread_func(void *arg) {
+    prefetch_all_samples((SampleBank *)arg);
+    return NULL;
+}
+#endif
+
+void sample_bank_prefetch(SampleBank *bank) {
+    if (!bank->articulations || bank->num_articulations == 0) return;
+
+#ifdef __linux__
+    // Hint the kernel to read ahead all mapped files
+    for (int a = 0; a < bank->num_articulations; a++) {
+        for (int m = 0; m < MIC_COUNT; m++) {
+            MicSampleSet *ms = &bank->articulations[a].mics[m];
+            for (int v = 0; v < MAX_VELOCITY_LAYERS; v++) {
+                for (int r = 0; r < MAX_ROUND_ROBINS; r++) {
+                    SampleBuffer *buf = &ms->buffers[v][r];
+                    if (buf->loaded && buf->wav.map_base)
+                        madvise(buf->wav.map_base, buf->wav.map_size, MADV_WILLNEED);
+                }
+            }
+        }
+    }
+    fprintf(stderr, "ggd-libre: issued madvise(WILLNEED) for all samples\n");
+#endif
+
+    // Also start a background thread to touch all pages (works on both platforms,
+    // and ensures pages are actually faulted in on Windows where there's no madvise)
+#ifdef _WIN32
+    _beginthreadex(NULL, 0, prefetch_thread_func, bank, 0, NULL);
+#else
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, prefetch_thread_func, bank) == 0)
+        pthread_detach(thread);
+#endif
 }

@@ -344,6 +344,9 @@ static bool plug_init(const struct clap_plugin *plugin) {
                              plug->kick_size, plug->snare_type,
                              plug->tom_head, plug->china_size, plug->stack_type);
 
+    // Start background prefetch of sample data into OS page cache
+    sample_bank_prefetch(&plug->bank);
+
     return true;
 }
 
