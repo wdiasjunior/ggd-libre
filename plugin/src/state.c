@@ -3,7 +3,7 @@
 #include <string.h>
 
 #define STATE_MAGIC 0x47474431  // "GGD1"
-#define STATE_VERSION 4
+#define STATE_VERSION 5
 
 typedef struct {
     uint32_t magic;

@@ -79,6 +79,8 @@ typedef enum {
     CH_TOMS_FAR,
     // Cymbals tab
     CH_HIHAT,
+    CH_LCRASH,
+    CH_RCRASH,
     CH_RIDE,
     CH_STACK,
     CH_SPLASH,
@@ -86,14 +88,15 @@ typedef enum {
     CH_CYMBALS_OH,
     CH_CYMBALS_NEAR,
     CH_CYMBALS_FAR,
-    MIXER_CHANNEL_COUNT  // = 25
+    MIXER_CHANNEL_COUNT  // = 27
 } MixerChannel;
 
 static const char *MIXER_CHANNEL_NAMES[MIXER_CHANNEL_COUNT] = {
     "Kick Close", "Kick OH", "Kick Near", "Kick Far",
     "Snare Top 1", "Snare Top 2", "Snare Bottom", "Snare OH", "Snare Near", "Snare Far",
     "Rack 1", "Rack 2", "Floor 1", "Floor 2", "Toms OH", "Toms Near", "Toms Far",
-    "Hi-Hat", "Ride", "Stack", "Splash", "China", "Cymbals OH", "Cymbals Near", "Cymbals Far"
+    "Hi-Hat", "L Crash", "R Crash", "Ride", "Stack", "Splash", "China",
+    "Cymbals OH", "Cymbals Near", "Cymbals Far"
 };
 
 typedef enum {
@@ -143,6 +146,9 @@ typedef enum {
 
 #define TOTAL_PARAMS (1 + TAB_COUNT + MIXER_CHANNEL_COUNT * PARAM_CH_COUNT + PARAM_VAR_COUNT)
 
+// Output ports: port 0 = master (full mix), ports 1..25 = per mixer channel
+#define NUM_OUTPUT_PORTS (1 + MIXER_CHANNEL_COUNT)
+
 static inline uint32_t param_channel_id(MixerChannel ch, int offset) {
     return PARAM_CHANNEL_BASE + ch * 10 + offset;
 }
@@ -171,9 +177,12 @@ static inline GuiTab drum_type_tab(DrumType drum) {
 // Route a drum type + mic position to the correct mixer channel.
 // Returns -1 if this drum type doesn't use this mic position.
 static inline int get_mixer_channel(DrumType drum, MicPosition mic) {
+    // Crashes route ALL their mics (OH/Near/Far) to a single crash channel
+    if (drum == DRUM_LCRASH) return (mic == MIC_CLOSE) ? -1 : CH_LCRASH;
+    if (drum == DRUM_RCRASH) return (mic == MIC_CLOSE) ? -1 : CH_RCRASH;
+
     // Room mics route to per-tab channels
     if (mic == MIC_OH || mic == MIC_NEAR_ROOM || mic == MIC_FAR_ROOM) {
-        // Each tab has its own OH/Near/Far set
         switch (drum_type_tab(drum)) {
         case TAB_KICK:
             if (mic == MIC_OH)        return CH_KICK_OH;
@@ -213,7 +222,7 @@ static inline int get_mixer_channel(DrumType drum, MicPosition mic) {
     case DRUM_CHINA:  return (mic == MIC_CLOSE) ? CH_CHINA : -1;
     case DRUM_STACK:  return (mic == MIC_CLOSE) ? CH_STACK : -1;
     case DRUM_SPLASH: return (mic == MIC_CLOSE) ? CH_SPLASH : -1;
-    case DRUM_LCRASH: return -1;
+    case DRUM_LCRASH: return -1; // handled above
     case DRUM_RCRASH: return -1;
     case DRUM_ACCENT: return -1;
     default:          return -1;

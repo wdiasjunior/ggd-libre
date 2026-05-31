@@ -73,6 +73,8 @@ static const StripInfo s_tom_strips[] = {
 
 static const StripInfo s_cymbal_strips[] = {
     { CH_HIHAT,       "HI-HAT" },
+    { CH_LCRASH,      "L CRASH" },
+    { CH_RCRASH,      "R CRASH" },
     { CH_RIDE,        "RIDE" },
     { CH_STACK,       "STACK" },
     { CH_SPLASH,      "SPLASH" },
@@ -89,7 +91,7 @@ static const StripInfo *get_strips(GuiTab tab, int *count) {
     case TAB_KICK:    *count = 4; return s_kick_strips;
     case TAB_SNARE:   *count = 6; return s_snare_strips;
     case TAB_TOMS:    *count = 7; return s_tom_strips;
-    case TAB_CYMBALS: *count = 8; return s_cymbal_strips;
+    case TAB_CYMBALS: *count = 10; return s_cymbal_strips;
     default:          *count = 0; return NULL;
     }
 }
@@ -175,9 +177,12 @@ static void draw_selector_with_preview(cairo_t *cr, int x, int *y,
     widget_draw_selector(cr, x, *y, SELECTOR_W, SELECTOR_H, label, value);
 }
 
+// Bottom area starts after fader strips + knobs + buttons
+#define BOTTOM_AREA_Y  (STRIP_TOP + FADER_H + 10 + KNOB_R*2 + 12 + BTN_H*2 + BTN_GAP + 15)
+
 static void draw_variant_selectors(cairo_t *cr, ggd_plugin_t *plug, GuiTab tab) {
     int sel_x = 10;
-    int sel_y = GUI_HEIGHT - SELECTOR_H - PREVIEW_BTN_H - 13;
+    int sel_y = BOTTOM_AREA_Y;
 
     switch (tab) {
     case TAB_KICK: {
@@ -206,22 +211,39 @@ static void draw_variant_selectors(cairo_t *cr, ggd_plugin_t *plug, GuiTab tab) 
         break;
     }
     case TAB_CYMBALS: {
+        // 7 cymbal pieces, each with preview button + info/selector box
+        // Order matches strip faders: Hi-Hat, L Crash, R Crash, Ride, Stack, Splash, China
+        static const char *cymbal_names[] = {
+            "Hi-Hat", "L Crash", "R Crash", "Ride", "Stack", "Splash", "China"
+        };
         const char *lcrash[] = {"17\" Byz Thin", "18\" Med Byz"};
         const char *rcrash[] = {"20\" Byz Thin", "19\" Med Byz"};
         const char *china[] = {"China", "18\" China"};
-        const char *stack[] = {"Stack", "Mini Stack"};
-        int sx = sel_x;
-        for (int i = 0; i < 4; i++) {
-            const char *label, *value;
+        const char *stack_v[] = {"Stack", "Mini Stack"};
+
+        int item_w = SELECTOR_W;
+        int item_gap = 10;
+        int info_y = sel_y + PREVIEW_BTN_H + 3;
+
+        for (int i = 0; i < 7; i++) {
+            int ix = sel_x + i * (item_w + item_gap);
+
+            // Preview button
+            draw_preview_button(cr, ix, sel_y, item_w, PREVIEW_BTN_H);
+
+            // Info/selector box below
+            const char *value;
             switch (i) {
-            case 0: label = "L Crash"; value = lcrash[plug->lcrash_size % 2]; break;
-            case 1: label = "R Crash"; value = rcrash[plug->rcrash_size % 2]; break;
-            case 2: label = "China";   value = china[plug->china_size % 2]; break;
-            default: label = "Stack";  value = stack[plug->stack_type % 2]; break;
+            case 0: value = "14\" Paiste 2002"; break;                    // Hi-Hat
+            case 1: value = lcrash[plug->lcrash_size % 2]; break;         // L Crash
+            case 2: value = rcrash[plug->rcrash_size % 2]; break;         // R Crash
+            case 3: value = "22\" Paiste Ride"; break;                    // Ride
+            case 4: value = stack_v[plug->stack_type % 2]; break;         // Stack
+            case 5: value = "Paiste 2002 Splash"; break;                  // Splash
+            default: value = china[plug->china_size % 2]; break;          // China
             }
-            int y = sel_y;
-            draw_selector_with_preview(cr, sx, &y, label, value);
-            sx += SELECTOR_W + 10;
+            widget_draw_selector(cr, ix, info_y, item_w, SELECTOR_H,
+                                 cymbal_names[i], value);
         }
         break;
     }
@@ -392,26 +414,52 @@ static HitResult hit_test(PluginGui *gui, int mx, int my) {
     }
 
     // Preview buttons and selectors
-    int preview_y = GUI_HEIGHT - SELECTOR_H - PREVIEW_BTN_H - 13;
-    int sel_y = preview_y + PREVIEW_BTN_H + 3;
-    if (my >= preview_y && my < sel_y + SELECTOR_H) {
+    int preview_y = BOTTOM_AREA_Y;
+    int sel_bottom_y = preview_y + PREVIEW_BTN_H + 3;
+
+    if (gui->active_tab == TAB_CYMBALS) {
+        // Cymbals: 7 items, each with preview button + selector/info box
+        int item_w = SELECTOR_W, item_gap = 10;
+        int info_y = preview_y + PREVIEW_BTN_H + 3;
+
+        for (int i = 0; i < 7; i++) {
+            int ix = 10 + i * (item_w + item_gap);
+            if (mx >= ix && mx < ix + item_w) {
+                if (my >= preview_y && my < preview_y + PREVIEW_BTN_H) {
+                    r.type = HIT_PREVIEW;
+                    r.selector_idx = i;
+                    return r;
+                }
+                if (my >= info_y && my < info_y + SELECTOR_H) {
+                    // Only L Crash(1), R Crash(2), Stack(4), China(6) have variants
+                    if (i == 1 || i == 2 || i == 4 || i == 6) {
+                        r.type = HIT_SELECTOR;
+                        r.selector_idx = i;
+                        return r;
+                    }
+                }
+            }
+        }
+    } else {
+        // Other tabs: preview + selector paired
         int num = 0;
         switch (gui->active_tab) {
         case TAB_KICK: num = 1; break; case TAB_SNARE: num = 1; break;
-        case TAB_TOMS: num = 4; break; case TAB_CYMBALS: num = 4; break;
-        default: break;
+        case TAB_TOMS: num = 4; break; default: break;
         }
-        for (int i = 0; i < num; i++) {
-            int sx = 10 + i * (SELECTOR_W + 10);
-            if (mx >= sx && mx < sx + SELECTOR_W) {
-                if (my < sel_y) {
-                    r.type = HIT_PREVIEW;
-                    r.selector_idx = i;
-                } else {
-                    r.type = HIT_SELECTOR;
-                    r.selector_idx = i;
+        if (my >= preview_y && my < sel_bottom_y + SELECTOR_H) {
+            for (int i = 0; i < num; i++) {
+                int sx = 10 + i * (SELECTOR_W + 10);
+                if (mx >= sx && mx < sx + SELECTOR_W) {
+                    if (my < sel_bottom_y) {
+                        r.type = HIT_PREVIEW;
+                        r.selector_idx = i;
+                    } else {
+                        r.type = HIT_SELECTOR;
+                        r.selector_idx = i;
+                    }
+                    return r;
                 }
-                return r;
             }
         }
     }
@@ -456,10 +504,13 @@ static int preview_midi_note(GuiTab tab, int sel_idx) {
         return -1;
     case TAB_CYMBALS:
         switch (sel_idx) {
-        case 0: return 62;  // L Crash Hit
-        case 1: return 67;  // R Crash Hit
-        case 2: return 76;  // China Main Hit
-        case 3: return 81;  // Stack Tight Hit
+        case 0: return 47;  // Hi-Hat Tip Closed
+        case 1: return 62;  // L Crash Hit
+        case 2: return 67;  // R Crash Hit
+        case 3: return 72;  // Ride Tip
+        case 4: return 81;  // Stack Tight Hit
+        case 5: return 83;  // Splash Hit
+        case 6: return 76;  // China Main Hit
         }
         return -1;
     default: return -1;
@@ -481,10 +532,10 @@ static void cycle_selector(ggd_plugin_t *plug, GuiTab tab, int sel_idx) {
             plug->tom_head[sel_idx] = (plug->tom_head[sel_idx] + 1) % 2;
         break;
     case TAB_CYMBALS:
-        if (sel_idx == 0)      plug->lcrash_size = (plug->lcrash_size + 1) % 2;
-        else if (sel_idx == 1) plug->rcrash_size = (plug->rcrash_size + 1) % 2;
-        else if (sel_idx == 2) plug->china_size = (plug->china_size + 1) % 2;
-        else if (sel_idx == 3) plug->stack_type = (plug->stack_type + 1) % 2;
+        if (sel_idx == 1)      plug->lcrash_size = (plug->lcrash_size + 1) % 2;
+        else if (sel_idx == 2) plug->rcrash_size = (plug->rcrash_size + 1) % 2;
+        else if (sel_idx == 4) plug->stack_type = (plug->stack_type + 1) % 2;
+        else if (sel_idx == 6) plug->china_size = (plug->china_size + 1) % 2;
         break;
     default: break;
     }
@@ -594,8 +645,18 @@ void gui_handle_mouse_down(PluginGui *gui, int mx, int my) {
 
     case HIT_PAN_KNOB:
         if (hit.strip_index < strip_count) {
+            int pan_pid = (int)param_channel_id(strips[hit.strip_index].channel, PARAM_CH_PAN);
+            if (gui->last_click_hit == pan_pid && (now - gui->last_click_time_ms) < DOUBLE_CLICK_MS) {
+                gui->plug->engine.channels[strips[hit.strip_index].channel].pan = 0.0f;
+                engine_update_channel(&gui->plug->engine, strips[hit.strip_index].channel);
+                gui->last_click_hit = -1;
+                break;
+            }
+            gui->last_click_hit = pan_pid;
+            gui->last_click_time_ms = now;
+
             gui->dragging = true;
-            gui->drag_param_id = param_channel_id(strips[hit.strip_index].channel, PARAM_CH_PAN);
+            gui->drag_param_id = pan_pid;
             gui->drag_start_y = my;
             gui->drag_start_value = gui->plug->engine.channels[strips[hit.strip_index].channel].pan;
         }

@@ -72,8 +72,8 @@ extern const clap_plugin_timer_support_t ggd_timer_ext;
 extern const clap_plugin_posix_fd_support_t ggd_posix_fd_ext;
 #endif
 
-#define GUI_WIDTH  850
-#define GUI_HEIGHT 500
+#define GUI_WIDTH  1010
+#define GUI_HEIGHT 490
 
 // Shared drawing/logic (defined in gui_common.c, called by platform backends)
 void gui_draw(PluginGui *gui);

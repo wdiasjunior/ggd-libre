@@ -7,3 +7,5 @@ If you like me use Linux and are interested in music production, you have likely
 ggd-libre has no affiliation to GGD and I do condone piracy of their products. This project simply exists as a way to use the plugin you paid for without relying on proprietary Kontakt bullshit and DRM.
 
 Disclaimer, this project was entirely vibe coded as an experiment to gauge how well LLMs fare in reverse engineering tasks.
+
+---

@@ -15,7 +15,8 @@ typedef struct {
     char        name[64];
     NoteVariant variants[MAX_VARIANTS];
     int         num_variants;
-    int         active_variant;
+    int         active_indices[MAX_VARIANTS]; // which variants to play simultaneously
+    int         num_active;                   // how many to play (usually 1, kick needs 2)
 } MidiNoteSlot;
 
 typedef struct {

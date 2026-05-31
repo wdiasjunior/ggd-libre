@@ -101,9 +101,15 @@ bool midi_map_load(MidiMap *map, const SampleBank *bank, const char *json_path) 
 
     cJSON_Delete(root);
 
+    // Default: play first variant only
     int mapped = 0;
     for (int i = 0; i < MAX_MIDI_NOTES; i++) {
-        if (map->slots[i].num_variants > 0) mapped++;
+        MidiNoteSlot *slot = &map->slots[i];
+        if (slot->num_variants > 0) {
+            slot->num_active = 1;
+            slot->active_indices[0] = 0;
+            mapped++;
+        }
     }
     fprintf(stderr, "ggd-libre: %d MIDI notes mapped\n", mapped);
     return mapped > 0;
@@ -192,7 +198,7 @@ void midi_map_update_variants(MidiMap *map, const SampleBank *bank,
         }
     }
 
-    // Kick, toms, china, stack: use active_variant index (JSON has multiple entries)
+    // Kick, toms, china, stack: set active indices (may be multiple for kick)
     for (int note = 0; note < MAX_MIDI_NOTES; note++) {
         MidiNoteSlot *slot = &map->slots[note];
         if (slot->num_variants <= 1) continue;
@@ -201,8 +207,18 @@ void midi_map_update_variants(MidiMap *map, const SampleBank *bank,
 
         switch (dt) {
         case DRUM_KICK:
-            if (kick_size < slot->num_variants)
-                slot->active_variant = kick_size;
+            // Kick has 4 variants: [0]=22x16 close, [1]=22x20 close, [2]=22x16 room, [3]=22x20 room
+            // Need to play BOTH close and room for the selected size
+            slot->num_active = 0;
+            for (int vi = 0; vi < slot->num_variants; vi++) {
+                // kick_size 0 → indices 0,2 (22x16); kick_size 1 → indices 1,3 (22x20)
+                if ((vi % 2) == kick_size)
+                    slot->active_indices[slot->num_active++] = vi;
+            }
+            if (slot->num_active == 0) {
+                slot->num_active = 1;
+                slot->active_indices[0] = 0;
+            }
             break;
 
         case DRUM_RACK1:
@@ -211,19 +227,19 @@ void midi_map_update_variants(MidiMap *map, const SampleBank *bank,
         case DRUM_FLOOR2: {
             int tom_idx = dt - DRUM_RACK1;
             int head = tom_head[tom_idx];
-            if (head < slot->num_variants)
-                slot->active_variant = head;
+            slot->num_active = 1;
+            slot->active_indices[0] = (head < slot->num_variants) ? head : 0;
             break;
         }
 
         case DRUM_CHINA:
-            if (china_size < slot->num_variants)
-                slot->active_variant = china_size;
+            slot->num_active = 1;
+            slot->active_indices[0] = (china_size < slot->num_variants) ? china_size : 0;
             break;
 
         case DRUM_STACK:
-            if (stack_type < slot->num_variants)
-                slot->active_variant = stack_type;
+            slot->num_active = 1;
+            slot->active_indices[0] = (stack_type < slot->num_variants) ? stack_type : 0;
             break;
 
         default:

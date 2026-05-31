@@ -33,18 +33,27 @@ static const clap_plugin_descriptor_t s_descriptor = {
 // ---------- Audio Ports ----------
 
 static uint32_t audio_ports_count(const clap_plugin_t *plugin, bool is_input) {
-    return is_input ? 0 : 1;
+    (void)plugin;
+    return is_input ? 0 : NUM_OUTPUT_PORTS;
 }
 
 static bool audio_ports_get(const clap_plugin_t *plugin, uint32_t index,
                             bool is_input, clap_audio_port_info_t *info) {
-    if (is_input || index > 0) return false;
-    info->id = 0;
-    snprintf(info->name, sizeof(info->name), "Stereo Out");
+    (void)plugin;
+    if (is_input || index >= NUM_OUTPUT_PORTS) return false;
+
+    info->id = index;
     info->channel_count = 2;
-    info->flags = CLAP_AUDIO_PORT_IS_MAIN;
     info->port_type = CLAP_PORT_STEREO;
     info->in_place_pair = CLAP_INVALID_ID;
+
+    if (index == 0) {
+        snprintf(info->name, sizeof(info->name), "Master");
+        info->flags = CLAP_AUDIO_PORT_IS_MAIN;
+    } else {
+        snprintf(info->name, sizeof(info->name), "%s", MIXER_CHANNEL_NAMES[index - 1]);
+        info->flags = 0;
+    }
     return true;
 }
 
@@ -452,11 +461,22 @@ static clap_process_status plug_process(const struct clap_plugin *plugin,
     uint32_t ev_index = 0;
     uint32_t next_ev_frame = nev > 0 ? 0 : nframes;
 
-    float *out_l = process->audio_outputs[0].data32[0];
-    float *out_r = process->audio_outputs[0].data32[1];
+    // Build output buffer array from host-provided ports
+    uint32_t num_ports = process->audio_outputs_count;
+    if (num_ports > NUM_OUTPUT_PORTS) num_ports = NUM_OUTPUT_PORTS;
+
+    StereoOut outs[NUM_OUTPUT_PORTS];
+    for (uint32_t p = 0; p < NUM_OUTPUT_PORTS; p++) {
+        if (p < num_ports && process->audio_outputs[p].data32) {
+            outs[p].l = process->audio_outputs[p].data32[0];
+            outs[p].r = process->audio_outputs[p].data32[1];
+        } else {
+            outs[p].l = NULL;
+            outs[p].r = NULL;
+        }
+    }
 
     for (uint32_t i = 0; i < nframes;) {
-        // Process events at this frame
         while (ev_index < nev && next_ev_frame == i) {
             const clap_event_header_t *hdr =
                 process->in_events->get(process->in_events, ev_index);
@@ -472,10 +492,17 @@ static clap_process_status plug_process(const struct clap_plugin *plugin,
             }
         }
 
-        // Render audio from current position to next event
         uint32_t block_size = next_ev_frame - i;
+
+        // Offset all output buffers for this block
+        StereoOut block_outs[NUM_OUTPUT_PORTS];
+        for (uint32_t p = 0; p < NUM_OUTPUT_PORTS; p++) {
+            block_outs[p].l = outs[p].l ? outs[p].l + i : NULL;
+            block_outs[p].r = outs[p].r ? outs[p].r + i : NULL;
+        }
+
         engine_render(&plug->engine, &plug->bank,
-                      out_l + i, out_r + i, block_size);
+                      block_outs, NUM_OUTPUT_PORTS, block_size);
         i = next_ev_frame;
     }
 

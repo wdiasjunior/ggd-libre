@@ -62,57 +62,65 @@ static int velocity_to_layer(float velocity, int num_layers) {
     return layer;
 }
 
-void engine_note_on(AudioEngine *engine, const SampleBank *bank, const MidiMap *map,
-                    int midi_note, float velocity) {
-    if (midi_note < 0 || midi_note >= MAX_MIDI_NOTES) return;
-
-    const MidiNoteSlot *slot = &map->slots[midi_note];
-    if (slot->num_variants == 0) return;
-
-    const NoteVariant *var = &slot->variants[slot->active_variant];
-
-    if (var->is_choke_trigger && var->choke_group != CHOKE_NONE)
-        engine_choke(engine, var->choke_group);
-
-    const ArticulationSamples *art = &bank->articulations[var->articulation_index];
-
-    int layer = velocity_to_layer(velocity, art->num_velocity_layers);
-    int rr = engine->rr_counters[midi_note] % art->num_round_robins;
-    engine->rr_counters[midi_note]++;
-
-    uint32_t max_frames = 0;
-    for (int m = 0; m < MIC_COUNT; m++) {
-        if (!art->mics[m].available) continue;
-        const SampleBuffer *buf = &art->mics[m].buffers[layer][rr];
-        if (buf->loaded && buf->wav.num_frames > max_frames)
-            max_frames = buf->wav.num_frames;
-    }
-    if (max_frames == 0) return;
-
-    int voice_idx = -1;
+static int find_free_voice(AudioEngine *engine) {
     uint32_t oldest_pos = 0;
     int oldest_idx = 0;
     for (int i = 0; i < MAX_VOICES; i++) {
-        if (!engine->voices[i].active) { voice_idx = i; break; }
+        if (!engine->voices[i].active) return i;
         if (engine->voices[i].playback_pos > oldest_pos) {
             oldest_pos = engine->voices[i].playback_pos;
             oldest_idx = i;
         }
     }
-    if (voice_idx < 0) voice_idx = oldest_idx;
+    return oldest_idx; // steal oldest
+}
 
-    Voice *v = &engine->voices[voice_idx];
-    v->active = true;
-    v->articulation_index = var->articulation_index;
-    v->drum_type = var->drum_type;
-    v->velocity_layer = layer;
-    v->round_robin = rr;
-    v->playback_pos = 0;
-    v->velocity_gain = velocity;
-    v->choke_group = var->choke_group;
-    v->fading_out = false;
-    v->fade_gain = 1.0f;
-    v->max_frame_count = max_frames;
+void engine_note_on(AudioEngine *engine, const SampleBank *bank, const MidiMap *map,
+                    int midi_note, float velocity) {
+    if (midi_note < 0 || midi_note >= MAX_MIDI_NOTES) return;
+
+    const MidiNoteSlot *slot = &map->slots[midi_note];
+    if (slot->num_active == 0) return;
+
+    // Handle choke from the first active variant
+    const NoteVariant *first_var = &slot->variants[slot->active_indices[0]];
+    if (first_var->is_choke_trigger && first_var->choke_group != CHOKE_NONE)
+        engine_choke(engine, first_var->choke_group);
+
+    int rr_base = engine->rr_counters[midi_note];
+    engine->rr_counters[midi_note]++;
+
+    // Trigger a voice for each active variant (usually 1, kick needs 2: close + room)
+    for (int ai = 0; ai < slot->num_active; ai++) {
+        const NoteVariant *var = &slot->variants[slot->active_indices[ai]];
+        const ArticulationSamples *art = &bank->articulations[var->articulation_index];
+
+        int layer = velocity_to_layer(velocity, art->num_velocity_layers);
+        int rr = rr_base % art->num_round_robins;
+
+        uint32_t max_frames = 0;
+        for (int m = 0; m < MIC_COUNT; m++) {
+            if (!art->mics[m].available) continue;
+            const SampleBuffer *buf = &art->mics[m].buffers[layer][rr];
+            if (buf->loaded && buf->wav.num_frames > max_frames)
+                max_frames = buf->wav.num_frames;
+        }
+        if (max_frames == 0) continue;
+
+        int voice_idx = find_free_voice(engine);
+        Voice *v = &engine->voices[voice_idx];
+        v->active = true;
+        v->articulation_index = var->articulation_index;
+        v->drum_type = var->drum_type;
+        v->velocity_layer = layer;
+        v->round_robin = rr;
+        v->playback_pos = 0;
+        v->velocity_gain = velocity;
+        v->choke_group = var->choke_group;
+        v->fading_out = false;
+        v->fade_gain = 1.0f;
+        v->max_frame_count = max_frames;
+    }
 }
 
 void engine_note_off(AudioEngine *engine, int midi_note) {
@@ -130,9 +138,12 @@ void engine_choke(AudioEngine *engine, ChokeGroup group) {
 }
 
 void engine_render(AudioEngine *engine, const SampleBank *bank,
-                   float *out_l, float *out_r, uint32_t num_frames) {
-    memset(out_l, 0, num_frames * sizeof(float));
-    memset(out_r, 0, num_frames * sizeof(float));
+                   StereoOut *outs, uint32_t num_ports, uint32_t num_frames) {
+    // Clear all output buffers
+    for (uint32_t p = 0; p < num_ports; p++) {
+        if (outs[p].l) memset(outs[p].l, 0, num_frames * sizeof(float));
+        if (outs[p].r) memset(outs[p].r, 0, num_frames * sizeof(float));
+    }
 
     float fade_decrement = 0.0f;
     if (engine->choke_fade_samples > 0)
@@ -143,7 +154,8 @@ void engine_render(AudioEngine *engine, const SampleBank *bank,
         if (!v->active) continue;
 
         const ArticulationSamples *art = &bank->articulations[v->articulation_index];
-        float tab_gain = engine->tab_master_linear[drum_type_tab(v->drum_type)];
+        GuiTab tab = drum_type_tab(v->drum_type);
+        float tab_gain = engine->tab_master_linear[tab];
 
         for (uint32_t i = 0; i < num_frames; i++) {
             uint32_t pos = v->playback_pos + i;
@@ -162,7 +174,6 @@ void engine_render(AudioEngine *engine, const SampleBank *bank,
                 }
             }
 
-            // Route each mic through its mixer channel independently
             for (int m = 0; m < MIC_COUNT; m++) {
                 if (!art->mics[m].available) continue;
                 const SampleBuffer *buf = &art->mics[m].buffers[v->velocity_layer][v->round_robin];
@@ -177,10 +188,45 @@ void engine_render(AudioEngine *engine, const SampleBank *bank,
 
                 float sample = wav_sample_at(&buf->wav, pos);
                 float phase = ch->phase_invert ? -1.0f : 1.0f;
-                sample *= voice_fade * tab_gain * ch->gain_linear * phase;
+                float ch_sample = sample * voice_fade * ch->gain_linear * phase;
+                float sl = ch_sample * ch->pan_l;
+                float sr = ch_sample * ch->pan_r;
 
-                out_l[i] += sample * ch->pan_l;
-                out_r[i] += sample * ch->pan_r;
+                // Write to per-channel output port
+                uint32_t ch_port = (uint32_t)mix_ch + 1;
+                if (ch_port < num_ports && outs[ch_port].l) {
+                    outs[ch_port].l[i] += sl;
+                    outs[ch_port].r[i] += sr;
+                }
+
+                // Crashes also route through the cymbal room channel for that mic
+                // so the cymbal OH/Near/Far faders affect crashes too
+                if (v->drum_type == DRUM_LCRASH || v->drum_type == DRUM_RCRASH) {
+                    int room_ch = -1;
+                    if (m == MIC_OH)        room_ch = CH_CYMBALS_OH;
+                    else if (m == MIC_NEAR_ROOM) room_ch = CH_CYMBALS_NEAR;
+                    else if (m == MIC_FAR_ROOM)  room_ch = CH_CYMBALS_FAR;
+
+                    if (room_ch >= 0) {
+                        const ChannelParams *rch = &engine->channels[room_ch];
+                        if (!rch->mute && !(engine->any_solo && !rch->solo)) {
+                            uint32_t rport = (uint32_t)room_ch + 1;
+                            float room_sample = sample * voice_fade * rch->gain_linear
+                                                * (rch->phase_invert ? -1.0f : 1.0f);
+                            if (rport < num_ports && outs[rport].l) {
+                                outs[rport].l[i] += room_sample * rch->pan_l;
+                                outs[rport].r[i] += room_sample * rch->pan_r;
+                            }
+                        }
+                    }
+                }
+
+                // Accumulate to master (port 0) with tab + global master gains
+                if (outs[0].l) {
+                    float master_sample = ch_sample * tab_gain;
+                    outs[0].l[i] += master_sample * ch->pan_l;
+                    outs[0].r[i] += master_sample * ch->pan_r;
+                }
             }
         }
 
@@ -191,8 +237,11 @@ void engine_render(AudioEngine *engine, const SampleBank *bank,
         }
     }
 
-    for (uint32_t i = 0; i < num_frames; i++) {
-        out_l[i] *= engine->master_gain_linear;
-        out_r[i] *= engine->master_gain_linear;
+    // Apply global master gain to port 0 only
+    if (outs[0].l) {
+        for (uint32_t i = 0; i < num_frames; i++) {
+            outs[0].l[i] *= engine->master_gain_linear;
+            outs[0].r[i] *= engine->master_gain_linear;
+        }
     }
 }

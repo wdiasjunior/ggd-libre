@@ -50,8 +50,17 @@ void engine_note_on(AudioEngine *engine, const SampleBank *bank, const MidiMap *
                     int midi_note, float velocity);
 void engine_note_off(AudioEngine *engine, int midi_note);
 void engine_choke(AudioEngine *engine, ChokeGroup group);
+// Output buffer pair (left + right) for one port
+typedef struct {
+    float *l;
+    float *r;
+} StereoOut;
+
+// Render to multiple output ports.
+// outs[0] = master (full mix), outs[1..N] = per mixer channel.
+// num_ports may be less than NUM_OUTPUT_PORTS if host doesn't provide all.
 void engine_render(AudioEngine *engine, const SampleBank *bank,
-                   float *out_l, float *out_r, uint32_t num_frames);
+                   StereoOut *outs, uint32_t num_ports, uint32_t num_frames);
 void engine_update_channel(AudioEngine *engine, MixerChannel ch);
 void engine_update_master(AudioEngine *engine);
 void engine_update_tab_master(AudioEngine *engine, GuiTab tab);
