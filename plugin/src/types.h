@@ -142,12 +142,48 @@ typedef enum {
 #define PARAM_VAR_STACK_TYPE    307
 #define PARAM_VAR_LCRASH_SIZE   308
 #define PARAM_VAR_RCRASH_SIZE   309
-#define PARAM_VAR_COUNT         10
+#define PARAM_VAR_MIDI_MAP_MODE 310
+#define PARAM_VAR_COUNT         11
 
 #define TOTAL_PARAMS (1 + TAB_COUNT + MIXER_CHANNEL_COUNT * PARAM_CH_COUNT + PARAM_VAR_COUNT)
 
-// Output ports: port 0 = master (full mix), ports 1..25 = per mixer channel
+// Output ports: port 0 = master (full mix), ports 1..N = per mixer channel
 #define NUM_OUTPUT_PORTS (1 + MIXER_CHANNEL_COUNT)
+
+// GM drum note -> GGD note remapping.
+// Returns the GGD note for a GM note, or the note unchanged if no mapping exists.
+static inline int gm_to_ggd_note(int note) {
+    static const int8_t map[128] = {
+        [35] = 24,  // Bass Drum 2 -> Kick
+        [36] = 24,  // Bass Drum 1 -> Kick
+        [37] = 30,  // Side Stick -> Stick Click
+        [38] = 26,  // Snare -> Snare Hit
+        [39] = 26,  // Hand Clap -> Snare Hit
+        [40] = 26,  // Electric Snare -> Snare Hit
+        [41] = 39,  // Low Floor Tom -> Floor Tom
+        [42] = 47,  // Closed Hi-Hat -> Tip Closed
+        [43] = 39,  // High Floor Tom -> Floor Tom
+        [44] = 43,  // Pedal Hi-Hat -> Pedal Chik
+        [45] = 37,  // Low Tom -> Mid Tom 2
+        [46] = 55,  // Open Hi-Hat -> Tip Open 3
+        [47] = 35,  // Low-Mid Tom -> Mid Tom 1
+        [48] = 33,  // Hi-Mid Tom -> Hi Tom
+        [49] = 62,  // Crash 1 -> Left Crash
+        [50] = 33,  // High Tom -> Hi Tom
+        [51] = 72,  // Ride 1 -> Ride Tip
+        [52] = 76,  // Chinese Cymbal -> China
+        [53] = 74,  // Ride Bell -> Ride Bell Tip
+        [54] = 81,  // Tambourine -> Stack Tight
+        [55] = 83,  // Splash -> Splash Hit
+        [56] = 25,  // Cowbell -> Stick Click Kick
+        [57] = 67,  // Crash 2 -> Right Crash
+        [58] = 77,  // Vibraslap -> China Choke
+        [59] = 73,  // Ride 2 -> Ride Crash
+    };
+    if (note >= 35 && note <= 59 && map[note] != 0)
+        return map[note];
+    return note; // pass through unmapped notes (including GGD-native notes)
+}
 
 static inline uint32_t param_channel_id(MixerChannel ch, int offset) {
     return PARAM_CHANNEL_BASE + ch * 10 + offset;

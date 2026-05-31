@@ -175,6 +175,10 @@ bool params_get_info(uint32_t param_index, clap_param_info_t *info) {
             strncpy(info->name, "R Crash", CLAP_NAME_SIZE);
             info->max_value = 1.0;
             break;
+        case PARAM_VAR_MIDI_MAP_MODE:
+            strncpy(info->name, "MIDI Map", CLAP_NAME_SIZE);
+            info->max_value = 1.0;
+            break;
         }
         return true;
     }
@@ -259,6 +263,9 @@ bool params_value_to_text(uint32_t param_id, double value,
     case PARAM_VAR_RCRASH_SIZE:
         if (vi >= 0 && vi <= 1)
             snprintf(buf, buf_size, "%s", variant_names_rcrash[vi]);
+        return true;
+    case PARAM_VAR_MIDI_MAP_MODE:
+        snprintf(buf, buf_size, "%s", vi == 0 ? "GGD" : "General MIDI");
         return true;
     }
 

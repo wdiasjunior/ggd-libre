@@ -3,7 +3,7 @@
 #include <string.h>
 
 #define STATE_MAGIC 0x47474431  // "GGD1"
-#define STATE_VERSION 5
+#define STATE_VERSION 6
 
 typedef struct {
     uint32_t magic;
@@ -17,6 +17,7 @@ typedef struct {
     int32_t  stack_type;
     int32_t  lcrash_size;
     int32_t  rcrash_size;
+    int32_t  midi_map_mode;
     struct {
         float gain_db;
         float pan;
@@ -64,6 +65,7 @@ bool state_save(const struct ggd_plugin *plug, const clap_ostream_t *stream) {
     state.stack_type = plug->stack_type;
     state.lcrash_size = plug->lcrash_size;
     state.rcrash_size = plug->rcrash_size;
+    state.midi_map_mode = plug->midi_map_mode;
 
     for (int i = 0; i < MIXER_CHANNEL_COUNT; i++) {
         const ChannelParams *ch = &plug->engine.channels[i];
@@ -100,6 +102,7 @@ bool state_load(struct ggd_plugin *plug, const clap_istream_t *stream) {
     plug->stack_type = state.stack_type;
     plug->lcrash_size = state.lcrash_size;
     plug->rcrash_size = state.rcrash_size;
+    plug->midi_map_mode = state.midi_map_mode;
 
     for (int i = 0; i < MIXER_CHANNEL_COUNT; i++) {
         ChannelParams *ch = &plug->engine.channels[i];

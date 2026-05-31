@@ -29,6 +29,9 @@ typedef struct ggd_plugin {
     int lcrash_size;
     int rcrash_size;
 
+    // MIDI map mode: 0=GGD, 1=GM
+    int midi_map_mode;
+
     // Path to samples (resolved at init)
     char samples_path[1024];
 

@@ -169,7 +169,8 @@ static bool plug_params_get_value(const clap_plugin_t *plugin, clap_id param_id,
     case PARAM_VAR_CHINA_SIZE: *out = plug->china_size; return true;
     case PARAM_VAR_STACK_TYPE:  *out = plug->stack_type; return true;
     case PARAM_VAR_LCRASH_SIZE: *out = plug->lcrash_size; return true;
-    case PARAM_VAR_RCRASH_SIZE: *out = plug->rcrash_size; return true;
+    case PARAM_VAR_RCRASH_SIZE:   *out = plug->rcrash_size; return true;
+    case PARAM_VAR_MIDI_MAP_MODE: *out = plug->midi_map_mode; return true;
     }
 
     return false;
@@ -229,7 +230,8 @@ static void apply_param_value(ggd_plugin_t *plug, clap_id param_id, double value
     case PARAM_VAR_CHINA_SIZE: plug->china_size = vi; variant_changed = true; break;
     case PARAM_VAR_STACK_TYPE:  plug->stack_type = vi; variant_changed = true; break;
     case PARAM_VAR_LCRASH_SIZE: plug->lcrash_size = vi; variant_changed = true; break;
-    case PARAM_VAR_RCRASH_SIZE: plug->rcrash_size = vi; variant_changed = true; break;
+    case PARAM_VAR_RCRASH_SIZE:   plug->rcrash_size = vi; variant_changed = true; break;
+    case PARAM_VAR_MIDI_MAP_MODE: plug->midi_map_mode = vi; break;
     }
 
     if (variant_changed) {
@@ -412,13 +414,22 @@ static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
     switch (hdr->type) {
     case CLAP_EVENT_NOTE_ON: {
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
+        int key = ev->key;
+        if (plug->midi_map_mode == 1) {
+            int orig = key;
+            key = gm_to_ggd_note(key);
+            if (orig != key)
+                fprintf(stderr, "ggd-libre: GM remap %d -> %d\n", orig, key);
+        }
         engine_note_on(&plug->engine, &plug->bank, &plug->midi_map,
-                       ev->key, (float)ev->velocity);
+                       key, (float)ev->velocity);
         break;
     }
     case CLAP_EVENT_NOTE_OFF: {
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
-        engine_note_off(&plug->engine, ev->key);
+        int key = ev->key;
+        if (plug->midi_map_mode == 1) key = gm_to_ggd_note(key);
+        engine_note_off(&plug->engine, key);
         break;
     }
     case CLAP_EVENT_NOTE_CHOKE: {
@@ -441,10 +452,10 @@ static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
         const clap_event_midi_t *ev = (const clap_event_midi_t *)hdr;
         uint8_t status = ev->data[0] & 0xF0;
         if (status == 0x90 && ev->data[2] > 0) {
-            // Note on
             float vel = ev->data[2] / 127.0f;
-            engine_note_on(&plug->engine, &plug->bank, &plug->midi_map,
-                           ev->data[1], vel);
+            int key = ev->data[1];
+            if (plug->midi_map_mode == 1) key = gm_to_ggd_note(key);
+            engine_note_on(&plug->engine, &plug->bank, &plug->midi_map, key, vel);
         } else if (status == 0x80 || (status == 0x90 && ev->data[2] == 0)) {
             engine_note_off(&plug->engine, ev->data[1]);
         }

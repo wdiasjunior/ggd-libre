@@ -279,6 +279,14 @@ void gui_draw(PluginGui *gui) {
     widget_draw_text(cr, 15, STRIP_TOP - 10, "GGD LIBRE", 16);
     cairo_select_font_face(cr, "sans-serif", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
 
+    // MIDI map mode selector (top right)
+    {
+        int mm_x = GUI_WIDTH - SELECTOR_W - 10;
+        int mm_y = TAB_BAR_H + 5;
+        const char *mode = plug->midi_map_mode == 0 ? "GGD" : "General MIDI";
+        widget_draw_selector(cr, mm_x, mm_y, SELECTOR_W, 28, "MIDI Map", mode);
+    }
+
     // Channel strips (aligned left)
     int strip_count;
     const StripInfo *strips = get_strips(gui->active_tab, &strip_count);
@@ -344,7 +352,7 @@ typedef enum {
     HIT_NONE = 0, HIT_TAB, HIT_FADER, HIT_MUTE, HIT_SOLO,
     HIT_PHASE, HIT_STEREO, HIT_PAN_KNOB,
     HIT_TAB_MASTER_FADER, HIT_GLOBAL_MASTER_FADER,
-    HIT_SELECTOR, HIT_PREVIEW,
+    HIT_SELECTOR, HIT_PREVIEW, HIT_MIDI_MAP,
 } HitType;
 
 typedef struct {
@@ -360,6 +368,16 @@ static HitResult hit_test(PluginGui *gui, int mx, int my) {
         int tab = mx / TAB_W;
         if (tab >= 0 && tab < TAB_COUNT) { r.type = HIT_TAB; r.strip_index = tab; }
         return r;
+    }
+
+    // MIDI map selector (top right)
+    {
+        int mm_x = GUI_WIDTH - SELECTOR_W - 10;
+        int mm_y = TAB_BAR_H + 5;
+        if (mx >= mm_x && mx < mm_x + SELECTOR_W && my >= mm_y && my < mm_y + 28) {
+            r.type = HIT_MIDI_MAP;
+            return r;
+        }
     }
 
     int strip_count;
@@ -668,6 +686,12 @@ void gui_handle_mouse_down(PluginGui *gui, int mx, int my) {
 
     case HIT_PREVIEW:
         play_preview(gui->plug, gui->active_tab, hit.selector_idx);
+        break;
+
+    case HIT_MIDI_MAP:
+        gui->plug->midi_map_mode = (gui->plug->midi_map_mode + 1) % 2;
+        fprintf(stderr, "ggd-libre: MIDI map mode changed to %s\n",
+                gui->plug->midi_map_mode == 0 ? "GGD" : "GM");
         break;
 
     default: break;
