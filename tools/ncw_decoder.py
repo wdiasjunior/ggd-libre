@@ -220,8 +220,11 @@ def decode_ncw(filepath: str) -> tuple[NcwHeader, np.ndarray]:
         header = read_header(f)
         block_offsets = read_block_offsets(f, header)
 
-        total_samples = header.num_samples * header.channels
-        overflow_samples = (total_samples % SAMPLES_PER_BLOCK) // header.channels
+        # Each block carries SAMPLES_PER_BLOCK samples *per channel*, so the
+        # final partial block is measured in frames, not interleaved samples.
+        # Dividing the interleaved count by channels under-counts on stereo
+        # files and used to leave the tail of every stereo sample unwritten.
+        overflow_samples = header.num_samples % SAMPLES_PER_BLOCK
 
         # Decode per-channel then interleave
         channels = [[] for _ in range(header.channels)]
@@ -261,7 +264,9 @@ def decode_ncw(filepath: str) -> tuple[NcwHeader, np.ndarray]:
 
     # Interleave channels
     num_frames = header.num_samples
-    interleaved = np.empty(num_frames * header.channels, dtype=np.int32)
+    # zeros, not empty: any frame the decode failed to produce must be silence
+    # rather than uninitialized memory (which reads as full-scale noise).
+    interleaved = np.zeros(num_frames * header.channels, dtype=np.int32)
     for i in range(num_frames):
         for ch in range(header.channels):
             if i < len(channels[ch]):

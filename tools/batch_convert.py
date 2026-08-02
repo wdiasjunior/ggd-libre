@@ -52,15 +52,16 @@ def convert_single(ncw_path: str, output_dir: str) -> tuple[str, bool, str]:
 
             # Pack samples as bytes
             if header.bits_per_sample == 24:
-                # Pack as 3 bytes per sample (little-endian signed)
-                raw = bytearray()
-                for s in samples:
-                    # Ensure proper 24-bit range
-                    s = int(s)
-                    if s < 0:
-                        s = s & 0xFFFFFF  # mask to 24 bits
-                    raw.extend(struct.pack('<I', s & 0xFFFFFF)[:3])
-                wf.writeframes(bytes(raw))
+                # A handful of files decode to values outside the signed 24-bit
+                # range. Masking those to 24 bits wraps a positive overshoot
+                # round to full-scale negative, which is an audible click, so
+                # clamp instead.
+                import numpy as np
+                clamped = np.clip(np.asarray(samples, dtype=np.int64),
+                                  -8388608, 8388607).astype('<i4')
+                # Drop the high byte of each little-endian int32 to get 24-bit.
+                raw = clamped.view(np.uint8).reshape(-1, 4)[:, :3].tobytes()
+                wf.writeframes(raw)
             elif header.bits_per_sample == 16:
                 raw = struct.pack(f'<{len(samples)}h', *samples.astype('int16'))
                 wf.writeframes(raw)

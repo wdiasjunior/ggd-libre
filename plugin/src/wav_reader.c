@@ -82,10 +82,20 @@ bool wav_open(const char *path, WavFile *out) {
             out->num_channels = read_le16(fmt + 2);
             out->sample_rate = read_le32(fmt + 4);
             out->bits_per_sample = read_le16(fmt + 14);
+
+            // The decoders below assume 24-bit, mono or stereo. Anything else
+            // would be read as garbage, so reject it instead of playing noise.
+            if (out->bits_per_sample != 24 ||
+                out->num_channels < 1 || out->num_channels > 2) {
+                fprintf(stderr,
+                        "ggd-libre: unsupported WAV format in %s (%u ch, %u bit)\n",
+                        path, out->num_channels, out->bits_per_sample);
+                goto fail;
+            }
+            out->frame_stride = (uint16_t)((out->bits_per_sample / 8) * out->num_channels);
             found_fmt = true;
         } else if (memcmp(chunk, "data", 4) == 0 && found_fmt) {
-            uint32_t bytes_per_sample = out->bits_per_sample / 8;
-            uint32_t frame_size = bytes_per_sample * out->num_channels;
+            uint32_t frame_size = out->frame_stride;
             out->num_frames = chunk_size / frame_size;
             out->pcm_data = chunk + 8;
 

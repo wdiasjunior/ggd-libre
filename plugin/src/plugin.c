@@ -336,6 +336,11 @@ static bool plug_init(const struct clap_plugin *plugin) {
     plug->host_posix_fd = (const clap_host_posix_fd_support_t *)
         plug->host->get_extension(plug->host, CLAP_EXT_POSIX_FD_SUPPORT);
 
+    // Bring the mixer up before anything else: the plugin struct is calloc'd, so
+    // without this every gain_linear is 0 (silence), and CLAP permits
+    // state.load() to arrive before activate().
+    engine_init(&plug->engine, 48000.0f);
+
     // Load samples
     if (plug->samples_path[0] == '\0') {
         fprintf(stderr, "ggd-libre: no samples path configured\n");
@@ -347,6 +352,7 @@ static bool plug_init(const struct clap_plugin *plugin) {
         fprintf(stderr, "ggd-libre: failed to load samples\n");
         return false;
     }
+    engine_set_source_rate(&plug->engine, plug->bank.sample_rate);
 
     // Load MIDI map
     char json_path[1024];
@@ -388,7 +394,10 @@ static void plug_destroy(const struct clap_plugin *plugin) {
 static bool plug_activate(const struct clap_plugin *plugin, double sample_rate,
                            uint32_t min_frames, uint32_t max_frames) {
     ggd_plugin_t *plug = plugin->plugin_data;
-    engine_init(&plug->engine, (float)sample_rate);
+    // Only refresh rate-dependent caches — a full engine_init here would wipe
+    // the mixer and any preset the host already restored via state.load().
+    engine_set_sample_rate(&plug->engine, (float)sample_rate);
+    engine_reset_voices(&plug->engine);
     plug->activated = true;
     return true;
 }
@@ -403,9 +412,7 @@ static void plug_stop_processing(const struct clap_plugin *plugin) {}
 
 static void plug_reset(const struct clap_plugin *plugin) {
     ggd_plugin_t *plug = plugin->plugin_data;
-    for (int i = 0; i < MAX_VOICES; i++)
-        plug->engine.voices[i].active = false;
-    memset(plug->engine.rr_counters, 0, sizeof(plug->engine.rr_counters));
+    engine_reset_voices(&plug->engine);
 }
 
 static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
@@ -414,13 +421,10 @@ static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
     switch (hdr->type) {
     case CLAP_EVENT_NOTE_ON: {
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
+        // No logging here: process_event runs on the audio thread, where a
+        // blocking write to stderr is a real-time violation and can glitch.
         int key = ev->key;
-        if (plug->midi_map_mode == 1) {
-            int orig = key;
-            key = gm_to_ggd_note(key);
-            if (orig != key)
-                fprintf(stderr, "ggd-libre: GM remap %d -> %d\n", orig, key);
-        }
+        if (plug->midi_map_mode == 1) key = gm_to_ggd_note(key);
         engine_note_on(&plug->engine, &plug->bank, &plug->midi_map,
                        key, (float)ev->velocity);
         break;
@@ -435,10 +439,13 @@ static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
     case CLAP_EVENT_NOTE_CHOKE: {
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
         // Kill all voices for this note
+        float step = plug->engine.choke_fade_samples > 0.0f
+                   ? 1.0f / plug->engine.choke_fade_samples : 1.0f;
         for (int i = 0; i < MAX_VOICES; i++) {
             if (plug->engine.voices[i].active) {
                 plug->engine.voices[i].fading_out = true;
                 plug->engine.voices[i].fade_gain = 1.0f;
+                plug->engine.voices[i].fade_step = step;
             }
         }
         break;

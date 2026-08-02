@@ -7,11 +7,24 @@
 #define MAX_MIC_POSITIONS    7
 #define MAX_VELOCITY_LAYERS  10
 #define MAX_ROUND_ROBINS     7
-#define MAX_VOICES           64
+#define MAX_VOICES           256
 #define MAX_MIDI_NOTES       128
 #define MAX_ARTICULATIONS    128
 #define MAX_VARIANTS         8
-#define CHOKE_FADE_MS        5.0f
+
+#define CHOKE_FADE_MS        5.0f   // fade applied when a choke group is triggered
+#define STEAL_FADE_MS        3.0f   // fade applied to a voice before it is retriggered
+#define MIC_TAIL_FADE_MS     8.0f   // ramp each mic out at its own end of file
+
+// Total intra-layer gain tilt, centred on the recorded level (+-half this).
+// The recorded velocity layers already carry the dynamics, so velocity must not
+// scale volume again; this only smooths the step at layer boundaries.
+#define VEL_TILT_DB          3.0f
+
+// Fixed headroom trim. A single hit sums up to 6 mic streams at unity, so the
+// bus needs room. Applied identically to every output port so the 27 stems
+// still sum to the master.
+#define OUTPUT_TRIM_DB      -6.0f
 
 // Mic positions in sample directories
 typedef enum {
