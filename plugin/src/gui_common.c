@@ -283,7 +283,9 @@ void gui_draw(PluginGui *gui) {
     {
         int mm_x = GUI_WIDTH - SELECTOR_W - 10;
         int mm_y = TAB_BAR_H + 5;
-        const char *mode = plug->midi_map_mode == 0 ? "GGD" : "General MIDI";
+        int mm = plug->midi_map_mode;
+        if (mm < 0 || mm >= MIDIMAP_MODE_COUNT) mm = 0;
+        const char *mode = MIDI_MAP_MODE_NAMES[mm];
         widget_draw_selector(cr, mm_x, mm_y, SELECTOR_W, 28, "MIDI Map", mode);
     }
 
@@ -689,9 +691,10 @@ void gui_handle_mouse_down(PluginGui *gui, int mx, int my) {
         break;
 
     case HIT_MIDI_MAP:
-        gui->plug->midi_map_mode = (gui->plug->midi_map_mode + 1) % 2;
+        gui->plug->midi_map_mode =
+            (gui->plug->midi_map_mode + 1) % MIDIMAP_MODE_COUNT;
         fprintf(stderr, "ggd-libre: MIDI map mode changed to %s\n",
-                gui->plug->midi_map_mode == 0 ? "GGD" : "GM");
+                MIDI_MAP_MODE_NAMES[gui->plug->midi_map_mode]);
         break;
 
     default: break;

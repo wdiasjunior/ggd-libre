@@ -424,7 +424,7 @@ static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
         // No logging here: process_event runs on the audio thread, where a
         // blocking write to stderr is a real-time violation and can glitch.
         int key = ev->key;
-        if (plug->midi_map_mode == 1) key = gm_to_ggd_note(key);
+        key = midi_remap_note(key, plug->midi_map_mode);
         engine_note_on(&plug->engine, &plug->bank, &plug->midi_map,
                        key, (float)ev->velocity);
         break;
@@ -432,7 +432,7 @@ static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
     case CLAP_EVENT_NOTE_OFF: {
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
         int key = ev->key;
-        if (plug->midi_map_mode == 1) key = gm_to_ggd_note(key);
+        key = midi_remap_note(key, plug->midi_map_mode);
         engine_note_off(&plug->engine, key);
         break;
     }
@@ -461,7 +461,7 @@ static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
         if (status == 0x90 && ev->data[2] > 0) {
             float vel = ev->data[2] / 127.0f;
             int key = ev->data[1];
-            if (plug->midi_map_mode == 1) key = gm_to_ggd_note(key);
+            key = midi_remap_note(key, plug->midi_map_mode);
             engine_note_on(&plug->engine, &plug->bank, &plug->midi_map, key, vel);
         } else if (status == 0x80 || (status == 0x90 && ev->data[2] == 0)) {
             engine_note_off(&plug->engine, ev->data[1]);
