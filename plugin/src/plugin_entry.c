@@ -105,8 +105,8 @@ factory_create_plugin(const struct clap_plugin_factory *factory,
         if (base[0]) {
             const char *candidates[] = {
                 "%s/GGD Matt Halpern Signature Pack/wav",
-                "%s/output/wav",
-                "%s/../output/wav",
+                "%s/output/halpern/wav",
+                "%s/../output/halpern/wav",
                 "%s/wav",
                 NULL
             };

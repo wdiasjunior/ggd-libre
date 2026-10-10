@@ -111,10 +111,10 @@ def generate_combined_sfz(midi_map: dict, mic_positions: list) -> str:
 
 def main():
     parser = argparse.ArgumentParser(description='Generate SFZ files from MIDI mapping')
-    parser.add_argument('--mapping', type=Path, default=Path('output/midi_map.json'))
-    parser.add_argument('--inventory', type=Path, default=Path('output/sample_inventory.json'))
-    parser.add_argument('--output-dir', type=Path, default=Path('output/sfz'))
-    parser.add_argument('--wav-dir', type=Path, default=Path('output/wav'),
+    parser.add_argument('--mapping', type=Path, default=Path('output/halpern/midi_map.json'))
+    parser.add_argument('--inventory', type=Path, default=Path('output/halpern/sample_inventory.json'))
+    parser.add_argument('--output-dir', type=Path, default=Path('output/halpern/sfz'))
+    parser.add_argument('--wav-dir', type=Path, default=Path('output/halpern/wav'),
                         help='Directory containing converted WAV files')
     args = parser.parse_args()
 

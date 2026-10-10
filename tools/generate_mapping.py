@@ -192,8 +192,8 @@ def generate_mapping(inventory_path: Path, output_path: Path):
 
 
 if __name__ == '__main__':
-    inventory_path = Path('output/sample_inventory.json')
-    output_path = Path('output/midi_map.json')
+    inventory_path = Path('output/halpern/sample_inventory.json')
+    output_path = Path('output/halpern/midi_map.json')
 
     if not inventory_path.exists():
         print("Run batch_convert.py --inventory-only first to generate sample_inventory.json")

@@ -286,9 +286,9 @@ static const clap_plugin_state_t s_state = {
 static void resolve_samples_path(ggd_plugin_t *plug, const char *plugin_path) {
     // Try to find samples relative to plugin location
     // Expected: plugin is at <project>/vst/ggd-libre.clap
-    // Samples at: <project>/output/wav/
+    // Samples at: <project>/output/halpern/wav/
     if (plugin_path && strlen(plugin_path) > 0) {
-        // Walk up from plugin_path to find output/wav
+        // Walk up from plugin_path to find output/halpern/wav
         char base[1024];
         strncpy(base, plugin_path, sizeof(base) - 1);
 
@@ -296,18 +296,18 @@ static void resolve_samples_path(ggd_plugin_t *plug, const char *plugin_path) {
         char *last_slash = strrchr(base, '/');
         if (last_slash) {
             *last_slash = '\0'; // now base = dir containing plugin
-            // Try <dir>/output/wav
+            // Try <dir>/output/halpern/wav
             snprintf(plug->samples_path, sizeof(plug->samples_path),
-                     "%s/output/wav", base);
+                     "%s/output/halpern/wav", base);
 
             FILE *test = fopen(plug->samples_path, "r");
             if (!test) {
-                // Try going up one more level: <dir>/../output/wav
+                // Try going up one more level: <dir>/../output/halpern/wav
                 last_slash = strrchr(base, '/');
                 if (last_slash) {
                     *last_slash = '\0';
                     snprintf(plug->samples_path, sizeof(plug->samples_path),
-                             "%s/output/wav", base);
+                             "%s/output/halpern/wav", base);
                 }
             } else {
                 fclose(test);
@@ -356,7 +356,7 @@ static bool plug_init(const struct clap_plugin *plugin) {
 
     // Load MIDI map
     char json_path[1024];
-    // midi_map.json is in output/ (one level up from output/wav/)
+    // midi_map.json is one level up from the wav/ directory
     char *wav_pos = strstr(plug->samples_path, "/wav");
     if (wav_pos) {
         size_t base_len = wav_pos - plug->samples_path;

@@ -32,13 +32,13 @@ GGD Matt Halpern Signature Pack KONTAKT/
 cd tools/
 python batch_convert.py \
     "../GGD Matt Halpern Signature Pack KONTAKT/Halpern Drums Samples" \
-    "../output"
+    "../output/halpern"
 ```
 
 This will:
 - Decode all 8,608 NCW files to 24-bit WAV (48kHz mono)
-- Organize them by mic position: `output/wav/CloseMic/`, `output/wav/OHMic/`, etc.
-- Generate `output/sample_inventory.json` with metadata
+- Organize them by mic position: `output/halpern/wav/CloseMic/`, `output/halpern/wav/OHMic/`, etc.
+- Generate `output/halpern/sample_inventory.json` with metadata
 
 Takes ~5-10 minutes depending on CPU (uses all cores).
 
@@ -46,19 +46,25 @@ Takes ~5-10 minutes depending on CPU (uses all cores).
 
 ```bash
 python generate_mapping.py \
-    "../output/sample_inventory.json" \
-    "../output/midi_map.json"
+    "../output/halpern/sample_inventory.json" \
+    "../output/halpern/midi_map.json"
 ```
 
 This creates `midi_map.json` mapping MIDI notes 24-83 to sample articulations.
+
+Then build the index the plugin loads:
+
+```bash
+python build_index.py halpern ../output/halpern
+```
 
 ### Step 4: Generate SFZ files (optional)
 
 ```bash
 python generate_sfz.py \
-    "../output/midi_map.json" \
-    "../output/wav" \
-    "../output/sfz"
+    "../output/halpern/midi_map.json" \
+    "../output/halpern/wav" \
+    "../output/halpern/sfz"
 ```
 
 ### Step 5: Install for the CLAP plugin
@@ -68,7 +74,7 @@ Copy the output to the plugin's sample directory:
 **Linux:**
 ```bash
 mkdir -p ~/.clap/GGD\ Matt\ Halpern\ Signature\ Pack/
-cp -r output/wav output/midi_map.json \
+cp -r output/halpern/wav output/halpern/midi_map.json output/halpern/library_index.json \
     ~/.clap/GGD\ Matt\ Halpern\ Signature\ Pack/
 cp plugin/ggd-libre-linux.clap ~/.clap/
 ```
@@ -80,6 +86,7 @@ C:\Program Files\Common Files\CLAP\
 ├── ggd-libre-windows.clap
 └── GGD Matt Halpern Signature Pack\
     ├── midi_map.json
+    ├── library_index.json
     └── wav\
         ├── CloseMic\
         ├── OHMic\
@@ -88,41 +95,123 @@ C:\Program Files\Common Files\CLAP\
 
 Or set the environment variable `GGD_SAMPLES_PATH` to point to the `wav/` directory.
 
-## GGD One Kit Wonder Metal
+## GGD One Kit Wonder Metal / GGD PV Matt Halpern Signature Pack
 
-**Status: Not currently supported.**
+> **Legal notice.** ggd-libre does not condone piracy and is not affiliated
+> with Getgood Drums or Native Instruments. These two libraries ship their
+> samples inside encrypted NKX containers. This repository does **not**
+> include, describe or link to any way of decrypting them, and issues or pull
+> requests asking for one will be closed. Use only samples you are licensed
+> to use, follow the library EULA, and never redistribute the WAV files or
+> anything derived from them.
 
-This pack uses encrypted NKX container files which cannot be extracted without Kontakt. The samples are stored in:
+The steps below start from WAV files you already have and are allowed to use.
+How you get them is up to you and your license. If you are unsure, ask
+Getgood Drums. Once you have the WAVs, the steps match the Halpern pack from
+Step 3 onward. The only difference is that `build_index.py` parses the GGD
+file names directly, so these libraries don't need a `midi_map.json`.
+
+| | One Kit Wonder Metal | PV Matt Halpern Signature Pack |
+|---|---|---|
+| Library slug | `okw_metal` | `pv_halpern` |
+| File prefix | `GGD-OKW3-` | `GGD-PV-` |
+| Samples | 4,652 | 13,902 |
+| WAV size | ~6.5 GB | ~14 GB |
+| Mic channels | `Cls`, `OH`, `Rm` / `RmMS` | `KckIn`, `KckOut`, `KckPrt`, `SnrTop`, `SnrBtm`, `Cls`, `OH`, `RmClsFOK`, `RmFarBlm`, `RmFarWde` |
+
+### Step 1: Locate the Kontakt library
+
+The libraries look like this. The `.nkx` files are encrypted, so the tools
+in this repository cannot read them:
+
 ```
-Getgood Drums One Kit Wonder Metal KONTAKT/
+GGD One Kit Wonder Metal/
+├── One Kit Wonder - Metal.nicnt
+├── Instruments/One Kit Wonder - Metal.nki
 └── Samples/
-    ├── OneKitWonder_Metal_0.nkx  (2.0 GB, encrypted)
-    ├── OneKitWonder_Metal_1.nkx  (600 MB, encrypted)
-    ├── OneKitWonder_Metal_0.nkc  (catalog)
-    └── OneKitWonder_Metal_1.nkc  (catalog)
+    ├── OneKitWonder_Metal_0.nkx / .nkc
+    └── OneKitWonder_Metal_1.nkx / .nkc
+
+GGD PV Matt Halpern Signature Pack/
+├── P5 Matt Halpern Signature Pack.nicnt
+├── Instruments/P5 Matt Halpern Signature Pack.nki
+└── Samples/
+    └── P5_Matt_Halpern_Signature_Pack_{0..3}.nkx / .nkc
 ```
 
-The NKX files contain 4,652 NCW samples with 14 drum pieces and 4 mic positions, but the data is encrypted by Kontakt's DRM.
+### Step 2: Arrange your WAV files
 
-### If you have Kontakt
+Put the WAVs under `output/<slug>/wav/`, one folder per drum piece, and keep
+the original GGD file names:
 
-If you own Kontakt, you can extract the samples using Kontakt's batch re-save:
-
-1. Open the `.nki` file in Kontakt
-2. Go to **File > Batch re-save**
-3. This decrypts and saves the samples as individual files
-4. The extracted files can then be processed with adapted extraction scripts
-
-### Sample naming convention (for reference)
-
-OKW Metal uses a different naming pattern than Halpern:
 ```
-GGD-OKW3-{Drum}-{Articulation}-{MicPosition}-{MicModel}-RR{N}-V{N}.ncw
+output/okw_metal/
+└── wav/
+    ├── 14x8PrlVPSigSnr/
+    │   └── GGD-OKW3-14x8PrlVPSigSnr-Eb-HitCtr-Cls-Sum-RR1-V1.wav
+    ├── 22x16TamaStclMplKck/
+    └── ...
+
+output/pv_halpern/
+└── wav/
+    ├── 14x6PrlMHSigSnr/
+    │   └── GGD-PV-14x6PrlMHSigSnr-Hgh-F#-CrsStk-OH-KM85i-RR1-V10.wav
+    ├── 22x18PrlRefKck/
+    └── ...
 ```
 
-Example: `GGD-OKW3-14x8PrlVPSigSnr-Eb-HitCtr-Cls-Sum-RR1-V1.ncw`
+The names follow this pattern:
 
-Mic positions: `Cls` (Close), `OH` (Overhead), `Rm` (Room), `RmMS` (Room Mid-Side)
+```
+GGD-<OKW3|PV>-<Piece>[-<Qualifiers>]-<Articulation>-<Mic>[-<MicModel>]-RR<n>-V<n>.wav
+```
+
+- `<Piece>`: drum or cymbal, e.g. `14x8PrlVPSigSnr`. This is also the folder name.
+- `<Qualifiers>`: optional, e.g. the snare tuning (`Low-D`, `Mid-E`, `Hgh-F#`).
+- `<Mic>`: one of the mic tokens in the table above.
+- `RR<n>`: round-robin index. `V<n>`: velocity layer.
+
+`build_index.py` scans `wav/` recursively, so it only needs the file names to
+be right. The folder layout just keeps things tidy. Files must be 24-bit PCM
+WAV (mono or stereo, 44.1 or 48 kHz).
+
+### Step 3: Build the library index
+
+```bash
+cd tools/
+python build_index.py okw_metal  ../output/okw_metal
+python build_index.py pv_halpern ../output/pv_halpern
+```
+
+This writes `library_index.json` next to `wav/`. The plugin loads it to map
+MIDI notes, velocity layers, round robins and kit-piece selectors (crashes,
+snare tuning, kick, ride, ...). All three kits use the same note layout
+(24-83, plus 31 for snare rimshot), so one MIDI part plays any of them. If a
+sample the mapping needs is missing, the script prints `ERROR:` lines and
+writes nothing.
+
+### Step 4: Install for the CLAP plugin
+
+> Plugin support for these two kits is still in progress. Until it lands,
+> the index is built but the plugin only loads the Halpern pack.
+
+The plugin looks for `<root>/<slug>/library_index.json`. The simplest setup
+is to point `GGD_LIBRE_ROOT` at a folder that holds the library folders:
+
+```
+~/GGD Libre/
+├── halpern/       (library_index.json + wav/)
+├── okw_metal/     (library_index.json + wav/)
+└── pv_halpern/    (library_index.json + wav/)
+```
+
+```bash
+export GGD_LIBRE_ROOT="$HOME/GGD Libre"
+```
+
+On Windows, set `GGD_LIBRE_ROOT` as a user environment variable. During
+development, the plugin also finds `output/<slug>/` next to the `.clap` file
+or one folder above it.
 
 ## File format reference
 
@@ -135,5 +224,5 @@ Mic positions: `Cls` (Close), `OH` (Overhead), `Rm` (Room), `RmMS` (Room Mid-Sid
 ### NKX (Kontakt Container)
 - Proprietary encrypted container bundling multiple NCW files
 - Directory section at the start lists filenames as UTF-16LE strings
-- Data section is encrypted — requires Kontakt for extraction
+- Data section is encrypted; this project does not read it and does not document how
 - Catalog stored in companion `.nkc` files

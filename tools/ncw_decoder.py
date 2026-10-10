@@ -235,8 +235,13 @@ def decode_ncw(filepath: str) -> tuple[NcwHeader, np.ndarray]:
             # Seek to block start
             f.seek(header.data_offset + offset)
 
+            block_samples = []
             for ch in range(header.channels):
                 block_hdr = read_block_header(f)
+                if ch == 0:
+                    # Kontakt takes the mid/side transform from the first
+                    # channel's flags only.
+                    mid_side = bool(block_hdr.flags & 1)
                 bit_width = abs(block_hdr.bits)
 
                 if block_hdr.bits > 0:
@@ -251,8 +256,15 @@ def decode_ncw(filepath: str) -> tuple[NcwHeader, np.ndarray]:
                     # Uncompressed
                     bytes_per_sample = header.bits_per_sample // 8
                     data = f.read(bytes_per_sample * SAMPLES_PER_BLOCK)
-                    samples = np.frombuffer(data, dtype=np.int32 if bytes_per_sample == 4
-                                           else np.dtype(f'<i{bytes_per_sample}'))
+                    if bytes_per_sample == 3:
+                        # numpy has no int24: assemble little-endian bytes and
+                        # sign-extend from bit 23.
+                        b = np.frombuffer(data, dtype=np.uint8).reshape(-1, 3).astype(np.int32)
+                        samples = b[:, 0] | (b[:, 1] << 8) | (b[:, 2] << 16)
+                        samples = np.where(samples & 0x800000, samples - 0x1000000, samples)
+                    else:
+                        samples = np.frombuffer(data, dtype=np.int32 if bytes_per_sample == 4
+                                               else np.dtype(f'<i{bytes_per_sample}'))
                     if bytes_per_sample < 4:
                         samples = samples.astype(np.int32)
 
@@ -260,17 +272,26 @@ def decode_ncw(filepath: str) -> tuple[NcwHeader, np.ndarray]:
                 if is_final and overflow_samples > 0:
                     samples = samples[:overflow_samples]
 
-                channels[ch].extend(samples.tolist())
+                block_samples.append(samples.astype(np.int32))
+
+            if mid_side and header.channels == 2:
+                # Sub-block 0 is mid, sub-block 1 is side (wrapping int32 math).
+                mid, side = block_samples
+                block_samples = [mid + side, mid - side]
+
+            for ch in range(header.channels):
+                channels[ch].append(block_samples[ch])
 
     # Interleave channels
     num_frames = header.num_samples
     # zeros, not empty: any frame the decode failed to produce must be silence
     # rather than uninitialized memory (which reads as full-scale noise).
-    interleaved = np.zeros(num_frames * header.channels, dtype=np.int32)
-    for i in range(num_frames):
-        for ch in range(header.channels):
-            if i < len(channels[ch]):
-                interleaved[i * header.channels + ch] = channels[ch][i]
+    planar = np.zeros((num_frames, header.channels), dtype=np.int32)
+    for ch in range(header.channels):
+        data = np.concatenate(channels[ch]) if channels[ch] else np.zeros(0, np.int32)
+        n = min(len(data), num_frames)
+        planar[:n, ch] = data[:n]
+    interleaved = planar.reshape(-1)
 
     return header, interleaved
 

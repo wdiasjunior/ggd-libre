@@ -16,6 +16,33 @@ import argparse
 import time
 
 
+def write_wav(wav_path, header, samples) -> None:
+    """Write decoded NCW samples to a WAV file at the header's bit depth."""
+    with wave.open(str(wav_path), 'wb') as wf:
+        wf.setnchannels(header.channels)
+        wf.setsampwidth(header.bits_per_sample // 8)
+        wf.setframerate(header.sample_rate)
+
+        # Pack samples as bytes
+        if header.bits_per_sample == 24:
+            # A handful of files decode to values outside the signed 24-bit
+            # range. Masking those to 24 bits wraps a positive overshoot
+            # round to full-scale negative, which is an audible click, so
+            # clamp instead.
+            import numpy as np
+            clamped = np.clip(np.asarray(samples, dtype=np.int64),
+                              -8388608, 8388607).astype('<i4')
+            # Drop the high byte of each little-endian int32 to get 24-bit.
+            raw = clamped.view(np.uint8).reshape(-1, 4)[:, :3].tobytes()
+            wf.writeframes(raw)
+        elif header.bits_per_sample == 16:
+            raw = struct.pack(f'<{len(samples)}h', *samples.astype('int16'))
+            wf.writeframes(raw)
+        elif header.bits_per_sample == 32:
+            raw = struct.pack(f'<{len(samples)}i', *samples)
+            wf.writeframes(raw)
+
+
 def convert_single(ncw_path: str, output_dir: str) -> tuple[str, bool, str]:
     """Convert a single NCW file to WAV. Returns (filename, success, message)."""
     # Import here so each worker process has its own import
@@ -44,30 +71,7 @@ def convert_single(ncw_path: str, output_dir: str) -> tuple[str, bool, str]:
         # Decode NCW
         header, samples = decode_ncw(str(ncw_path))
 
-        # Write WAV
-        with wave.open(str(wav_path), 'wb') as wf:
-            wf.setnchannels(header.channels)
-            wf.setsampwidth(header.bits_per_sample // 8)
-            wf.setframerate(header.sample_rate)
-
-            # Pack samples as bytes
-            if header.bits_per_sample == 24:
-                # A handful of files decode to values outside the signed 24-bit
-                # range. Masking those to 24 bits wraps a positive overshoot
-                # round to full-scale negative, which is an audible click, so
-                # clamp instead.
-                import numpy as np
-                clamped = np.clip(np.asarray(samples, dtype=np.int64),
-                                  -8388608, 8388607).astype('<i4')
-                # Drop the high byte of each little-endian int32 to get 24-bit.
-                raw = clamped.view(np.uint8).reshape(-1, 4)[:, :3].tobytes()
-                wf.writeframes(raw)
-            elif header.bits_per_sample == 16:
-                raw = struct.pack(f'<{len(samples)}h', *samples.astype('int16'))
-                wf.writeframes(raw)
-            elif header.bits_per_sample == 32:
-                raw = struct.pack(f'<{len(samples)}i', *samples)
-                wf.writeframes(raw)
+        write_wav(wav_path, header, samples)
 
         return (name, True, "ok")
 

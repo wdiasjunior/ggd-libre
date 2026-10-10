@@ -1,6 +1,6 @@
 GGD Matt Halpern Signature Pack KONTAKT
-GGD PV Matt Halpern Signature Pack KONTAKT
-Getgood Drums One Kit Wonder Metal KONTAKT
+GGD PV Matt Halpern Signature Pack
+GGD One Kit Wonder Metal
 output
 
 # Build artifacts
@@ -9,3 +9,6 @@ plugin/third_party/cjson/*.o
 plugin/third_party/mingw-cairo/build/
 plugin/third_party/mingw-cairo/linux-sysroot/
 plugin/third_party/mingw-cairo/sysroot/
+
+# Private tooling (never commit)
+tools/private/
