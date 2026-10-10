@@ -1,10 +1,32 @@
 #include "state.h"
 #include "plugin.h"
+#include "params.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define STATE_MAGIC 0x47474431  // "GGD1"
-#define STATE_VERSION 6
+#define STATE_VERSION 7
 
+// v7: header, the selected library's slug, then every parameter as an
+// (id, value) pair. Unknown ids are skipped on load, so adding parameters or
+// libraries later does not need another format change.
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    char     library[32];
+    uint32_t num_params;
+    uint32_t reserved;
+} StateHeader;
+
+typedef struct {
+    uint32_t id;
+    uint32_t reserved;
+    double   value;
+} StateParam;
+
+// v6 (single-library, Halpern only), kept for loading old sessions.
+#define V6_CHANNELS 27
 typedef struct {
     uint32_t magic;
     uint32_t version;
@@ -25,8 +47,8 @@ typedef struct {
         uint8_t solo;
         uint8_t phase_invert;
         uint8_t stereo_mode;
-    } channels[MIXER_CHANNEL_COUNT];
-} StateData;
+    } channels[V6_CHANNELS];
+} StateDataV6;
 
 static int64_t stream_write_all(const clap_ostream_t *stream, const void *buf, uint64_t size) {
     const uint8_t *p = buf;
@@ -51,74 +73,99 @@ static int64_t stream_read_all(const clap_istream_t *stream, void *buf, uint64_t
 }
 
 bool state_save(const struct ggd_plugin *plug, const clap_ostream_t *stream) {
-    StateData state;
-    memset(&state, 0, sizeof(state));
-    state.magic = STATE_MAGIC;
-    state.version = STATE_VERSION;
-    state.master_gain_db = plug->engine.master_gain_db;
-    for (int t = 0; t < TAB_COUNT; t++)
-        state.tab_master_db[t] = plug->engine.tab_master_db[t];
-    state.kick_size = plug->kick_size;
-    state.snare_type = plug->snare_type;
-    for (int i = 0; i < 4; i++) state.tom_head[i] = plug->tom_head[i];
-    state.china_size = plug->china_size;
-    state.stack_type = plug->stack_type;
-    state.lcrash_size = plug->lcrash_size;
-    state.rcrash_size = plug->rcrash_size;
-    state.midi_map_mode = plug->midi_map_mode;
-
-    for (int i = 0; i < MIXER_CHANNEL_COUNT; i++) {
-        const ChannelParams *ch = &plug->engine.channels[i];
-        state.channels[i].gain_db = ch->gain_db;
-        state.channels[i].pan = ch->pan;
-        state.channels[i].mute = ch->mute ? 1 : 0;
-        state.channels[i].solo = ch->solo ? 1 : 0;
-        state.channels[i].phase_invert = ch->phase_invert ? 1 : 0;
-        state.channels[i].stereo_mode = ch->stereo_mode ? 1 : 0;
+    uint32_t count = params_count();
+    StateParam *vals = calloc(count, sizeof(StateParam));
+    if (!vals) return false;
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t id = params_index_to_id(i);
+        double v;
+        if (plugin_get_param(plug, id, &v))
+            vals[n++] = (StateParam){ .id = id, .value = v };
     }
 
-    return stream_write_all(stream, &state, sizeof(state)) > 0;
+    StateHeader h;
+    memset(&h, 0, sizeof(h));
+    h.magic = STATE_MAGIC;
+    h.version = STATE_VERSION;
+    if (plug->selected_lib >= 0)
+        snprintf(h.library, sizeof(h.library), "%s", library_def(plug->selected_lib)->slug);
+    h.num_params = n;
+
+    bool ok = stream_write_all(stream, &h, sizeof(h)) > 0 &&
+              stream_write_all(stream, vals, (uint64_t)n * sizeof(StateParam)) >= 0;
+    free(vals);
+    return ok;
+}
+
+static void apply(struct ggd_plugin *plug, uint32_t id, double value) {
+    plugin_apply_param(plug, id, value);
+}
+
+// Halpern v6 field -> current param id.
+static bool load_v6(struct ggd_plugin *plug, const clap_istream_t *stream, uint32_t version) {
+    StateDataV6 s;
+    s.magic = STATE_MAGIC;
+    s.version = version;
+    // The two header words are already consumed.
+    if (stream_read_all(stream, (uint8_t *)&s + 8, sizeof(s) - 8) < 0)
+        return false;
+
+    const LibraryDef *d = &LIB_DEF_HALPERN;
+    apply(plug, PARAM_MASTER_GAIN, s.master_gain_db);
+    apply(plug, PARAM_MIDI_MAP_MODE, s.midi_map_mode);
+    for (int t = 0; t < TAB_COUNT; t++)
+        apply(plug, lib_param_tab_master(d, t), s.tab_master_db[t]);
+
+    const int32_t sel[10] = {
+        s.kick_size, s.snare_type, s.tom_head[0], s.tom_head[1], s.tom_head[2], s.tom_head[3],
+        s.china_size, s.stack_type, s.lcrash_size, s.rcrash_size,
+    };
+    for (int i = 0; i < 10 && i < d->num_selectors; i++)
+        apply(plug, d->selectors[i].param_id, sel[i]);
+
+    for (int c = 0; c < V6_CHANNELS && c < d->num_channels; c++) {
+        apply(plug, lib_param_channel(d, c, PARAM_CH_GAIN),   s.channels[c].gain_db);
+        apply(plug, lib_param_channel(d, c, PARAM_CH_PAN),    s.channels[c].pan);
+        apply(plug, lib_param_channel(d, c, PARAM_CH_MUTE),   s.channels[c].mute);
+        apply(plug, lib_param_channel(d, c, PARAM_CH_SOLO),   s.channels[c].solo);
+        apply(plug, lib_param_channel(d, c, PARAM_CH_PHASE),  s.channels[c].phase_invert);
+        apply(plug, lib_param_channel(d, c, PARAM_CH_STEREO), s.channels[c].stereo_mode);
+    }
+    plugin_select_library(plug, LIB_HALPERN);
+    return true;
 }
 
 bool state_load(struct ggd_plugin *plug, const clap_istream_t *stream) {
-    StateData state;
-    if (stream_read_all(stream, &state, sizeof(state)) < 0)
+    uint32_t head[2];
+    if (stream_read_all(stream, head, sizeof(head)) < 0 || head[0] != STATE_MAGIC)
+        return false;
+    if (head[1] == 6)
+        return load_v6(plug, stream, head[1]);
+    if (head[1] != STATE_VERSION)
         return false;
 
-    if (state.magic != STATE_MAGIC || state.version != STATE_VERSION)
+    StateHeader h;
+    h.magic = head[0];
+    h.version = head[1];
+    if (stream_read_all(stream, (uint8_t *)&h + 8, sizeof(h) - 8) < 0)
         return false;
+    h.library[sizeof(h.library) - 1] = '\0';
 
-    plug->engine.master_gain_db = state.master_gain_db;
-    engine_update_master(&plug->engine);
-    for (int t = 0; t < TAB_COUNT; t++) {
-        plug->engine.tab_master_db[t] = state.tab_master_db[t];
-        engine_update_tab_master(&plug->engine, (GuiTab)t);
+    for (uint32_t i = 0; i < h.num_params; i++) {
+        StateParam p;
+        if (stream_read_all(stream, &p, sizeof(p)) < 0)
+            return false;
+        apply(plug, p.id, p.value);
     }
 
-    plug->kick_size = state.kick_size;
-    plug->snare_type = state.snare_type;
-    for (int i = 0; i < 4; i++) plug->tom_head[i] = state.tom_head[i];
-    plug->china_size = state.china_size;
-    plug->stack_type = state.stack_type;
-    plug->lcrash_size = state.lcrash_size;
-    plug->rcrash_size = state.rcrash_size;
-    plug->midi_map_mode = state.midi_map_mode;
-
-    for (int i = 0; i < MIXER_CHANNEL_COUNT; i++) {
-        ChannelParams *ch = &plug->engine.channels[i];
-        ch->gain_db = state.channels[i].gain_db;
-        ch->pan = state.channels[i].pan;
-        ch->mute = state.channels[i].mute != 0;
-        ch->solo = state.channels[i].solo != 0;
-        ch->phase_invert = state.channels[i].phase_invert != 0;
-        ch->stereo_mode = state.channels[i].stereo_mode != 0;
-        engine_update_channel(&plug->engine, (MixerChannel)i);
+    // Keep the current library if the saved one isn't extracted here.
+    for (int l = 0; l < LIB_COUNT; l++) {
+        if (!strcmp(library_def(l)->slug, h.library)) {
+            if (!plugin_select_library(plug, l))
+                fprintf(stderr, "ggd-libre: saved library '%s' is not available\n", h.library);
+            break;
+        }
     }
-    engine_update_solo_state(&plug->engine);
-
-    midi_map_update_variants(&plug->midi_map, &plug->bank,
-                             plug->kick_size, plug->snare_type,
-                             plug->tom_head, plug->china_size, plug->stack_type,
-                             plug->lcrash_size, plug->rcrash_size);
     return true;
 }

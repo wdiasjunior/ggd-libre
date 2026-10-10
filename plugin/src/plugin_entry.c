@@ -2,7 +2,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
-#include <dirent.h>
 #include <clap/clap.h>
 #include "plugin.h"
 
@@ -101,34 +100,8 @@ factory_create_plugin(const struct clap_plugin_factory *factory,
 
         fprintf(stderr, "ggd-libre: plugin_path='%s' resolved base='%s'\n",
                 s_plugin_path, base);
-
-        if (base[0]) {
-            const char *candidates[] = {
-                "%s/GGD Matt Halpern Signature Pack/wav",
-                "%s/output/halpern/wav",
-                "%s/../output/halpern/wav",
-                "%s/wav",
-                NULL
-            };
-            char try_path[1024];
-            for (int i = 0; candidates[i]; i++) {
-                snprintf(try_path, sizeof(try_path), candidates[i], base);
-                DIR *d = opendir(try_path);
-                if (d) {
-                    closedir(d);
-                    char abs[1024] = {0};
-                    resolve_absolute(try_path, abs, sizeof(abs));
-                    strncpy(plug->samples_path, abs, sizeof(plug->samples_path) - 1);
-                    fprintf(stderr, "ggd-libre: found samples at %s\n", plug->samples_path);
-                    break;
-                }
-            }
-        }
-
-        // Environment variable overrides auto-detection
-        const char *env = getenv("GGD_SAMPLES_PATH");
-        if (env && env[0])
-            strncpy(plug->samples_path, env, sizeof(plug->samples_path) - 1);
+        // Libraries are located relative to this folder in plug_init.
+        snprintf(plug->base_path, sizeof(plug->base_path), "%s", base);
     }
 
     return plugin;

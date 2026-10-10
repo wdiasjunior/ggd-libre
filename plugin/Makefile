@@ -5,13 +5,17 @@ LIN_SYSROOT = third_party/mingw-cairo/linux-sysroot
 MINGW_SYSROOT = third_party/mingw-cairo/sysroot
 
 # Shared flags
-COMMON_CFLAGS = -Wall -Wextra -O2 -Iclap-sdk/include -Ithird_party/cjson -Isrc
+COMMON_CFLAGS = -Wall -Wextra -O2 -MMD -MP -Iclap-sdk/include -Ithird_party/cjson -Isrc
 
 # Core sources (platform-independent)
 CORE_SOURCES = src/plugin_entry.c \
                src/plugin.c \
                src/audio_engine.c \
                src/sample_bank.c \
+               src/library.c \
+               src/lib_halpern.c \
+               src/lib_okw.c \
+               src/lib_pv.c \
                src/midi_map.c \
                src/params.c \
                src/state.c \
@@ -46,6 +50,8 @@ MINGW_LDFLAGS = -shared -static-libgcc -static -lpthread -lm \
 WIN_SOURCES = $(CORE_SOURCES) src/gui_win32.c
 WIN_TARGET = ggd-libre-windows.clap
 
+-include $(LIN_OBJECTS:.o=.d)
+
 .PHONY: all clean install windows
 
 all: $(TARGET)
@@ -64,4 +70,4 @@ windows:
 	$(MINGW_CC) $(MINGW_CFLAGS) -o $(WIN_TARGET) $(WIN_SOURCES) $(MINGW_LDFLAGS)
 
 clean:
-	rm -f $(LIN_OBJECTS) $(TARGET) $(WIN_TARGET)
+	rm -f $(LIN_OBJECTS) $(LIN_OBJECTS:.o=.d) $(TARGET)

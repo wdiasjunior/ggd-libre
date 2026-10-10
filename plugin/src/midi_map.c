@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+// All libraries share the Halpern note layout, so drum type and choke
+// behaviour follow from the note number alone.
 static DrumType classify_drum_type(int midi_note) {
     if (midi_note == 24 || midi_note == 25) return DRUM_KICK;
     if (midi_note >= 26 && midi_note <= 32) return DRUM_SNARE;
@@ -37,213 +39,85 @@ static bool is_choke_trigger(int midi_note) {
     return false;
 }
 
-bool midi_map_load(MidiMap *map, const SampleBank *bank, const char *json_path) {
+static void parse_art_list(ArtList *out, const SampleBank *bank, const cJSON *arr,
+                           const char *context) {
+    out->count = 0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, arr) {
+        if (!cJSON_IsString(item) || out->count >= MAX_NOTE_ARTS) continue;
+        int idx = sample_bank_find(bank, item->valuestring);
+        if (idx < 0) {
+            fprintf(stderr, "ggd-libre: %s: articulation '%s' not in bank\n",
+                    context, item->valuestring);
+            continue;
+        }
+        out->arts[out->count++] = idx;
+    }
+}
+
+static int note_number(const char *key) {
+    char *end;
+    long n = strtol(key, &end, 10);
+    if (end == key || *end || n < 0 || n >= MAX_MIDI_NOTES) return -1;
+    return (int)n;
+}
+
+bool midi_map_load(MidiMap *map, const SampleBank *bank, const cJSON *notes,
+                   const cJSON *selectors, const char *const *selector_keys,
+                   int num_selectors) {
     memset(map, 0, sizeof(*map));
-
-    FILE *f = fopen(json_path, "rb");
-    if (!f) {
-        fprintf(stderr, "ggd-libre: cannot open %s\n", json_path);
-        return false;
+    for (int n = 0; n < MAX_MIDI_NOTES; n++) {
+        MidiNoteSlot *slot = &map->slots[n];
+        slot->selector = -1;
+        slot->drum_type = classify_drum_type(n);
+        slot->choke_group = get_choke_group(n);
+        slot->is_choke_trigger = is_choke_trigger(n);
     }
 
-    fseek(f, 0, SEEK_END);
-    long fsize = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    char *json_str = malloc(fsize + 1);
-    if (!json_str) { fclose(f); return false; }
-    fread(json_str, 1, fsize, f);
-    json_str[fsize] = '\0';
-    fclose(f);
-
-    cJSON *root = cJSON_Parse(json_str);
-    free(json_str);
-    if (!root) {
-        fprintf(stderr, "ggd-libre: JSON parse error\n");
-        return false;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry, notes) {
+        int n = note_number(entry->string);
+        if (n < 0) continue;
+        MidiNoteSlot *slot = &map->slots[n];
+        const cJSON *name = cJSON_GetObjectItem(entry, "name");
+        if (cJSON_IsString(name))
+            strncpy(slot->name, name->valuestring, sizeof(slot->name) - 1);
+        parse_art_list(&slot->play, bank, cJSON_GetObjectItem(entry, "play"), entry->string);
     }
 
-    cJSON *entry;
-    cJSON_ArrayForEach(entry, root) {
-        int midi_note = atoi(entry->string);
-        if (midi_note < 0 || midi_note >= MAX_MIDI_NOTES) continue;
-
-        MidiNoteSlot *slot = &map->slots[midi_note];
-
-        cJSON *name_item = cJSON_GetObjectItem(entry, "name");
-        if (name_item && name_item->valuestring)
-            strncpy(slot->name, name_item->valuestring, sizeof(slot->name) - 1);
-
-        cJSON *samples_arr = cJSON_GetObjectItem(entry, "samples");
-        if (!samples_arr) continue;
-
-        cJSON *sample;
-        cJSON_ArrayForEach(sample, samples_arr) {
-            if (slot->num_variants >= MAX_VARIANTS) break;
-
-            cJSON *prefix_item = cJSON_GetObjectItem(sample, "sample_prefix");
-            if (!prefix_item || !prefix_item->valuestring) continue;
-
-            int art_idx = sample_bank_find(bank, prefix_item->valuestring);
-            if (art_idx < 0) {
-                fprintf(stderr, "ggd-libre: sample prefix '%s' not found in bank\n",
-                        prefix_item->valuestring);
-                continue;
+    for (int s = 0; s < num_selectors; s++) {
+        const cJSON *opts = cJSON_GetObjectItem(selectors, selector_keys[s]);
+        if (!opts) {
+            fprintf(stderr, "ggd-libre: index has no selector '%s'\n", selector_keys[s]);
+            continue;
+        }
+        int o = 0;
+        const cJSON *opt;
+        cJSON_ArrayForEach(opt, opts) {
+            if (o >= MAX_MAP_OPTIONS) break;
+            const cJSON *note_entry;
+            cJSON_ArrayForEach(note_entry, opt) {
+                int n = note_number(note_entry->string);
+                if (n < 0) continue;
+                MidiNoteSlot *slot = &map->slots[n];
+                if (slot->selector >= 0 && slot->selector != s)
+                    fprintf(stderr, "ggd-libre: note %d claimed by selectors %d and %d\n",
+                            n, slot->selector, s);
+                slot->selector = s;
+                parse_art_list(&slot->options[o], bank, note_entry, selector_keys[s]);
             }
-
-            NoteVariant *var = &slot->variants[slot->num_variants++];
-            var->articulation_index = art_idx;
-            var->drum_type = classify_drum_type(midi_note);
-            var->choke_group = get_choke_group(midi_note);
-            var->is_choke_trigger = is_choke_trigger(midi_note);
+            o++;
         }
     }
 
-    cJSON_Delete(root);
-
-    // Default: play first variant only
     int mapped = 0;
-    for (int i = 0; i < MAX_MIDI_NOTES; i++) {
-        MidiNoteSlot *slot = &map->slots[i];
-        if (slot->num_variants > 0) {
-            slot->num_active = 1;
-            slot->active_indices[0] = 0;
-            mapped++;
-        }
+    for (int n = 0; n < MAX_MIDI_NOTES; n++) {
+        MidiNoteSlot *slot = &map->slots[n];
+        bool any = slot->play.count > 0;
+        for (int o = 0; o < MAX_MAP_OPTIONS && !any; o++) any = slot->options[o].count > 0;
+        if (any) mapped++;
+        else slot->name[0] = '\0';
     }
     fprintf(stderr, "ggd-libre: %d MIDI notes mapped\n", mapped);
     return mapped > 0;
-}
-
-// Snare variant prefix mapping:
-// [snare_type][articulation: 0=hit, 1=flam, 2=ruff, 3=off, 4=click/stick]
-static const char *SNARE_PREFIXES[5][5] = {
-    // High
-    { "SnareHigh", "SnareHigh_Flam", "SnareHigh_Ruff", "SnareHigh_Off", "SnareHigh_click" },
-    // Med
-    { "SnareMed",  "SnareMed_Flam",  "SnareMed_Ruff",  "SnareMed_Off",  "SnareMed_Stick" },
-    // Low
-    { "SnareLow",  "SnareLow_Flam",  "SnareLow_Ruff",  "SnareLow_Off",  "SnareLow_Stick" },
-    // 13"
-    { "13Snare",   "13Snare_Flam",   "13Snare_Ruff",   "13Snare_off",   "13Snare_Stick" },
-    // BFSD (no ruff or off)
-    { "SnareBFSD", "SnareBFSD_Flam", NULL,              NULL,            "SnareBFSD_Stick" },
-};
-
-// MIDI notes 26-30 map to snare articulations 0-4
-static const int SNARE_MIDI_NOTES[] = { 26, 27, 28, 29, 30 };
-#define NUM_SNARE_ARTICULATIONS 5
-
-// L Crash variant prefix mapping:
-// [size][articulation: 0=hit, 1=bell, 2=choke, 3=swell]
-static const char *LCRASH_PREFIXES[2][4] = {
-    { "17ByzThinCrash_MainHit", "17ByzThinCrash_Bell", "17ByzThinCrash_Choke", "17ByzThinCrash_Swell" },
-    { "18MedByzThinCrash",      "18MedByzThinCrash_Bell", "18MedByzThinCrash_Choke", "18MedByzThinCrash_Swell" },
-};
-static const int LCRASH_MIDI_NOTES[] = { 62, 63, 64, 65 };
-
-// R Crash variant prefix mapping:
-static const char *RCRASH_PREFIXES[2][4] = {
-    { "20ByzThinCrash_MainHit", "20ByzThinCrash_Bell", "20ByzThinCrash_Choke", "20ByzThinCrash_Swell" },
-    { "19MedByzThinCrash",      "19MedByzThinCrash_bell", "19MedByzThinCrash_Choke", "19MedByzThinCrash_Swell" },
-};
-static const int RCRASH_MIDI_NOTES[] = { 67, 68, 69, 70 };
-
-void midi_map_update_variants(MidiMap *map, const SampleBank *bank,
-                              int kick_size, int snare_type,
-                              int tom_head[4], int china_size, int stack_type,
-                              int lcrash_size, int rcrash_size) {
-    // Snare: swap articulation_index based on snare_type
-    if (snare_type >= 0 && snare_type < 5) {
-        for (int i = 0; i < NUM_SNARE_ARTICULATIONS; i++) {
-            int note = SNARE_MIDI_NOTES[i];
-            MidiNoteSlot *slot = &map->slots[note];
-            if (slot->num_variants == 0) continue;
-
-            const char *prefix = SNARE_PREFIXES[snare_type][i];
-            if (!prefix) continue; // BFSD has no ruff/off
-
-            int art_idx = sample_bank_find(bank, prefix);
-            if (art_idx >= 0) {
-                slot->variants[0].articulation_index = art_idx;
-            }
-        }
-    }
-
-    // L Crash: swap prefixes based on size
-    if (lcrash_size >= 0 && lcrash_size < 2) {
-        for (int i = 0; i < 4; i++) {
-            int note = LCRASH_MIDI_NOTES[i];
-            MidiNoteSlot *slot = &map->slots[note];
-            if (slot->num_variants == 0) continue;
-            const char *prefix = LCRASH_PREFIXES[lcrash_size][i];
-            if (!prefix) continue;
-            int art_idx = sample_bank_find(bank, prefix);
-            if (art_idx >= 0)
-                slot->variants[0].articulation_index = art_idx;
-        }
-    }
-
-    // R Crash: swap prefixes based on size
-    if (rcrash_size >= 0 && rcrash_size < 2) {
-        for (int i = 0; i < 4; i++) {
-            int note = RCRASH_MIDI_NOTES[i];
-            MidiNoteSlot *slot = &map->slots[note];
-            if (slot->num_variants == 0) continue;
-            const char *prefix = RCRASH_PREFIXES[rcrash_size][i];
-            if (!prefix) continue;
-            int art_idx = sample_bank_find(bank, prefix);
-            if (art_idx >= 0)
-                slot->variants[0].articulation_index = art_idx;
-        }
-    }
-
-    // Kick, toms, china, stack: set active indices (may be multiple for kick)
-    for (int note = 0; note < MAX_MIDI_NOTES; note++) {
-        MidiNoteSlot *slot = &map->slots[note];
-        if (slot->num_variants <= 1) continue;
-
-        DrumType dt = slot->variants[0].drum_type;
-
-        switch (dt) {
-        case DRUM_KICK:
-            // Kick has 4 variants: [0]=22x16 close, [1]=22x20 close, [2]=22x16 room, [3]=22x20 room
-            // Need to play BOTH close and room for the selected size
-            slot->num_active = 0;
-            for (int vi = 0; vi < slot->num_variants; vi++) {
-                // kick_size 0 → indices 0,2 (22x16); kick_size 1 → indices 1,3 (22x20)
-                if ((vi % 2) == kick_size)
-                    slot->active_indices[slot->num_active++] = vi;
-            }
-            if (slot->num_active == 0) {
-                slot->num_active = 1;
-                slot->active_indices[0] = 0;
-            }
-            break;
-
-        case DRUM_RACK1:
-        case DRUM_RACK2:
-        case DRUM_FLOOR1:
-        case DRUM_FLOOR2: {
-            int tom_idx = dt - DRUM_RACK1;
-            int head = tom_head[tom_idx];
-            slot->num_active = 1;
-            slot->active_indices[0] = (head < slot->num_variants) ? head : 0;
-            break;
-        }
-
-        case DRUM_CHINA:
-            slot->num_active = 1;
-            slot->active_indices[0] = (china_size < slot->num_variants) ? china_size : 0;
-            break;
-
-        case DRUM_STACK:
-            slot->num_active = 1;
-            slot->active_indices[0] = (stack_type < slot->num_variants) ? stack_type : 0;
-            break;
-
-        default:
-            break;
-        }
-    }
 }

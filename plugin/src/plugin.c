@@ -21,14 +21,18 @@ static const clap_plugin_descriptor_t s_descriptor = {
     .url = "",
     .manual_url = "",
     .support_url = "",
-    .version = "0.1.0",
-    .description = "GGD Matt Halpern drum sampler",
+    .version = "0.2.0",
+    .description = "Drum sampler for extracted GGD libraries",
     .features = (const char *[]){
         CLAP_PLUGIN_FEATURE_INSTRUMENT,
         CLAP_PLUGIN_FEATURE_STEREO,
         NULL
     },
 };
+
+static const LibraryDef *selected_def(const ggd_plugin_t *plug) {
+    return plug->selected_lib >= 0 ? library_def(plug->selected_lib) : NULL;
+}
 
 // ---------- Audio Ports ----------
 
@@ -39,7 +43,7 @@ static uint32_t audio_ports_count(const clap_plugin_t *plugin, bool is_input) {
 
 static bool audio_ports_get(const clap_plugin_t *plugin, uint32_t index,
                             bool is_input, clap_audio_port_info_t *info) {
-    (void)plugin;
+    ggd_plugin_t *plug = plugin->plugin_data;
     if (is_input || index >= NUM_OUTPUT_PORTS) return false;
 
     info->id = index;
@@ -47,11 +51,16 @@ static bool audio_ports_get(const clap_plugin_t *plugin, uint32_t index,
     info->port_type = CLAP_PORT_STEREO;
     info->in_place_pair = CLAP_INVALID_ID;
 
+    // The port count never changes; names follow the selected library.
+    const LibraryDef *d = selected_def(plug);
     if (index == 0) {
         snprintf(info->name, sizeof(info->name), "Master");
         info->flags = CLAP_AUDIO_PORT_IS_MAIN;
+    } else if (d && (int)index - 1 < d->num_channels) {
+        snprintf(info->name, sizeof(info->name), "%s", d->channels[index - 1].name);
+        info->flags = 0;
     } else {
-        snprintf(info->name, sizeof(info->name), "%s", MIXER_CHANNEL_NAMES[index - 1]);
+        snprintf(info->name, sizeof(info->name), "Stem %u", index);
         info->flags = 0;
     }
     return true;
@@ -65,11 +74,13 @@ static const clap_plugin_audio_ports_t s_audio_ports = {
 // ---------- Note Ports ----------
 
 static uint32_t note_ports_count(const clap_plugin_t *plugin, bool is_input) {
+    (void)plugin;
     return is_input ? 1 : 0;
 }
 
 static bool note_ports_get(const clap_plugin_t *plugin, uint32_t index,
                            bool is_input, clap_note_port_info_t *info) {
+    (void)plugin;
     if (!is_input || index > 0) return false;
     info->id = 0;
     snprintf(info->name, sizeof(info->name), "MIDI In");
@@ -85,32 +96,38 @@ static const clap_plugin_note_ports_t s_note_ports = {
 
 // ---------- Note Names ----------
 
+// Main thread only. The main thread is the only one that frees runtimes, so
+// the active pointer stays valid for the duration of the call.
+static const MidiMap *main_thread_map(const ggd_plugin_t *plug) {
+    LibraryRuntime *rt = atomic_load(&((ggd_plugin_t *)plug)->pending);
+    if (!rt) rt = atomic_load(&((ggd_plugin_t *)plug)->active);
+    return rt ? &rt->map : NULL;
+}
+
 static uint32_t note_name_count(const clap_plugin_t *plugin) {
-    ggd_plugin_t *plug = plugin->plugin_data;
+    const MidiMap *map = main_thread_map(plugin->plugin_data);
+    if (!map) return 0;
     uint32_t count = 0;
-    for (int i = 0; i < MAX_MIDI_NOTES; i++) {
-        if (plug->midi_map.slots[i].num_variants > 0 && plug->midi_map.slots[i].name[0])
-            count++;
-    }
+    for (int i = 0; i < MAX_MIDI_NOTES; i++)
+        if (map->slots[i].name[0]) count++;
     return count;
 }
 
 static bool note_name_get(const clap_plugin_t *plugin, uint32_t index,
-                           clap_note_name_t *note_name) {
-    ggd_plugin_t *plug = plugin->plugin_data;
+                          clap_note_name_t *note_name) {
+    const MidiMap *map = main_thread_map(plugin->plugin_data);
+    if (!map) return false;
     uint32_t count = 0;
     for (int i = 0; i < MAX_MIDI_NOTES; i++) {
-        if (plug->midi_map.slots[i].num_variants > 0 && plug->midi_map.slots[i].name[0]) {
-            if (count == index) {
-                strncpy(note_name->name, plug->midi_map.slots[i].name, CLAP_NAME_SIZE - 1);
-                note_name->name[CLAP_NAME_SIZE - 1] = '\0';
-                note_name->port = -1;
-                note_name->key = (int16_t)i;
-                note_name->channel = -1;
-                return true;
-            }
-            count++;
+        if (!map->slots[i].name[0]) continue;
+        if (count == index) {
+            snprintf(note_name->name, CLAP_NAME_SIZE, "%s", map->slots[i].name);
+            note_name->port = -1;
+            note_name->key = (int16_t)i;
+            note_name->channel = -1;
+            return true;
         }
+        count++;
     }
     return false;
 }
@@ -122,34 +139,19 @@ static const clap_plugin_note_name_t s_note_name = {
 
 // ---------- Params ----------
 
-static uint32_t plug_params_count(const clap_plugin_t *plugin) {
-    return params_count();
-}
+bool plugin_get_param(const ggd_plugin_t *plug, clap_id id, double *out) {
+    ParamRef ref;
+    if (!params_resolve(id, &ref)) return false;
+    const LibMix *mix = &plug->mix[ref.lib];
 
-static bool plug_params_get_info(const clap_plugin_t *plugin, uint32_t index,
-                                 clap_param_info_t *info) {
-    return params_get_info(index, info);
-}
-
-static bool plug_params_get_value(const clap_plugin_t *plugin, clap_id param_id,
-                                  double *out) {
-    ggd_plugin_t *plug = plugin->plugin_data;
-
-    if (param_id == PARAM_MASTER_GAIN) {
-        *out = plug->engine.master_gain_db;
-        return true;
-    }
-
-    if (param_id >= PARAM_TAB_MASTER_BASE && param_id < PARAM_TAB_MASTER_BASE + TAB_COUNT) {
-        *out = plug->engine.tab_master_db[param_id - PARAM_TAB_MASTER_BASE];
-        return true;
-    }
-
-    MixerChannel ch;
-    int offset;
-    if (param_is_channel(param_id, &ch, &offset)) {
-        const ChannelParams *cp = &plug->engine.channels[ch];
-        switch (offset) {
+    switch (ref.kind) {
+    case PK_MASTER:     *out = plug->engine.master_gain_db; return true;
+    case PK_MIDI_MAP:   *out = plug->midi_map_mode; return true;
+    case PK_TAB_MASTER: *out = mix->tab_master_db[ref.index]; return true;
+    case PK_SELECTOR:   *out = mix->selector[ref.index]; return true;
+    case PK_CHANNEL: {
+        const ChannelParams *cp = &mix->channels[ref.index];
+        switch (ref.offset) {
         case PARAM_CH_GAIN:   *out = cp->gain_db; return true;
         case PARAM_CH_PAN:    *out = cp->pan; return true;
         case PARAM_CH_MUTE:   *out = cp->mute ? 1.0 : 0.0; return true;
@@ -157,54 +159,39 @@ static bool plug_params_get_value(const clap_plugin_t *plugin, clap_id param_id,
         case PARAM_CH_PHASE:  *out = cp->phase_invert ? 1.0 : 0.0; return true;
         case PARAM_CH_STEREO: *out = cp->stereo_mode ? 1.0 : 0.0; return true;
         }
+        return false;
     }
-
-    switch (param_id) {
-    case PARAM_VAR_KICK_SIZE:  *out = plug->kick_size; return true;
-    case PARAM_VAR_SNARE_TYPE: *out = plug->snare_type; return true;
-    case PARAM_VAR_TOM1_HEAD:  *out = plug->tom_head[0]; return true;
-    case PARAM_VAR_TOM2_HEAD:  *out = plug->tom_head[1]; return true;
-    case PARAM_VAR_TOM3_HEAD:  *out = plug->tom_head[2]; return true;
-    case PARAM_VAR_TOM4_HEAD:  *out = plug->tom_head[3]; return true;
-    case PARAM_VAR_CHINA_SIZE: *out = plug->china_size; return true;
-    case PARAM_VAR_STACK_TYPE:  *out = plug->stack_type; return true;
-    case PARAM_VAR_LCRASH_SIZE: *out = plug->lcrash_size; return true;
-    case PARAM_VAR_RCRASH_SIZE:   *out = plug->rcrash_size; return true;
-    case PARAM_VAR_MIDI_MAP_MODE: *out = plug->midi_map_mode; return true;
+    default: return false;
     }
-
-    return false;
 }
 
-static bool plug_params_value_to_text(const clap_plugin_t *plugin, clap_id param_id,
-                                      double value, char *buf, uint32_t buf_size) {
-    return params_value_to_text(param_id, value, buf, buf_size);
-}
+void plugin_apply_param(ggd_plugin_t *plug, clap_id id, double value) {
+    ParamRef ref;
+    if (!params_resolve(id, &ref)) return;
+    LibMix *mix = &plug->mix[ref.lib];
+    const LibraryDef *d = library_def(ref.lib);
+    int vi = (int)(value + 0.5);
 
-static bool plug_params_text_to_value(const clap_plugin_t *plugin, clap_id param_id,
-                                      const char *text, double *out) {
-    return params_text_to_value(param_id, text, out);
-}
-
-static void apply_param_value(ggd_plugin_t *plug, clap_id param_id, double value) {
-    if (param_id == PARAM_MASTER_GAIN) {
+    switch (ref.kind) {
+    case PK_MASTER:
         plug->engine.master_gain_db = (float)value;
         engine_update_master(&plug->engine);
-        return;
-    }
-
-    if (param_id >= PARAM_TAB_MASTER_BASE && param_id < PARAM_TAB_MASTER_BASE + TAB_COUNT) {
-        int t = param_id - PARAM_TAB_MASTER_BASE;
-        plug->engine.tab_master_db[t] = (float)value;
-        engine_update_tab_master(&plug->engine, (GuiTab)t);
-        return;
-    }
-
-    MixerChannel ch;
-    int offset;
-    if (param_is_channel(param_id, &ch, &offset)) {
-        ChannelParams *cp = &plug->engine.channels[ch];
-        switch (offset) {
+        break;
+    case PK_MIDI_MAP:
+        if (vi >= 0 && vi < MIDIMAP_MODE_COUNT) plug->midi_map_mode = vi;
+        break;
+    case PK_TAB_MASTER:
+        mix->tab_master_db[ref.index] = (float)value;
+        libmix_update_tab_master(mix, (GuiTab)ref.index);
+        break;
+    case PK_SELECTOR:
+        if (vi < 0) vi = 0;
+        if (vi >= d->selectors[ref.index].num_options) vi = d->selectors[ref.index].num_options - 1;
+        mix->selector[ref.index] = vi;
+        break;
+    case PK_CHANNEL: {
+        ChannelParams *cp = &mix->channels[ref.index];
+        switch (ref.offset) {
         case PARAM_CH_GAIN:   cp->gain_db = (float)value; break;
         case PARAM_CH_PAN:    cp->pan = (float)value; break;
         case PARAM_CH_MUTE:   cp->mute = value > 0.5; break;
@@ -212,39 +199,47 @@ static void apply_param_value(ggd_plugin_t *plug, clap_id param_id, double value
         case PARAM_CH_PHASE:  cp->phase_invert = value > 0.5; break;
         case PARAM_CH_STEREO: cp->stereo_mode = value > 0.5; break;
         }
-        engine_update_channel(&plug->engine, ch);
-        if (offset == PARAM_CH_SOLO)
-            engine_update_solo_state(&plug->engine);
-        return;
+        libmix_update_channel(mix, ref.index);
+        if (ref.offset == PARAM_CH_SOLO)
+            libmix_update_solo(mix, d->num_channels);
+        break;
     }
-
-    bool variant_changed = false;
-    int vi = (int)(value + 0.5);
-    switch (param_id) {
-    case PARAM_VAR_KICK_SIZE:  plug->kick_size = vi; variant_changed = true; break;
-    case PARAM_VAR_SNARE_TYPE: plug->snare_type = vi; variant_changed = true; break;
-    case PARAM_VAR_TOM1_HEAD:  plug->tom_head[0] = vi; variant_changed = true; break;
-    case PARAM_VAR_TOM2_HEAD:  plug->tom_head[1] = vi; variant_changed = true; break;
-    case PARAM_VAR_TOM3_HEAD:  plug->tom_head[2] = vi; variant_changed = true; break;
-    case PARAM_VAR_TOM4_HEAD:  plug->tom_head[3] = vi; variant_changed = true; break;
-    case PARAM_VAR_CHINA_SIZE: plug->china_size = vi; variant_changed = true; break;
-    case PARAM_VAR_STACK_TYPE:  plug->stack_type = vi; variant_changed = true; break;
-    case PARAM_VAR_LCRASH_SIZE: plug->lcrash_size = vi; variant_changed = true; break;
-    case PARAM_VAR_RCRASH_SIZE:   plug->rcrash_size = vi; variant_changed = true; break;
-    case PARAM_VAR_MIDI_MAP_MODE: plug->midi_map_mode = vi; break;
-    }
-
-    if (variant_changed) {
-        midi_map_update_variants(&plug->midi_map, &plug->bank,
-                                 plug->kick_size, plug->snare_type,
-                                 plug->tom_head, plug->china_size, plug->stack_type,
-                             plug->lcrash_size, plug->rcrash_size);
+    default: break;
     }
 }
 
+static uint32_t plug_params_count(const clap_plugin_t *plugin) {
+    (void)plugin;
+    return params_count();
+}
+
+static bool plug_params_get_info(const clap_plugin_t *plugin, uint32_t index,
+                                 clap_param_info_t *info) {
+    (void)plugin;
+    return params_get_info(index, info);
+}
+
+static bool plug_params_get_value(const clap_plugin_t *plugin, clap_id param_id,
+                                  double *out) {
+    return plugin_get_param(plugin->plugin_data, param_id, out);
+}
+
+static bool plug_params_value_to_text(const clap_plugin_t *plugin, clap_id param_id,
+                                      double value, char *buf, uint32_t buf_size) {
+    (void)plugin;
+    return params_value_to_text(param_id, value, buf, buf_size);
+}
+
+static bool plug_params_text_to_value(const clap_plugin_t *plugin, clap_id param_id,
+                                      const char *text, double *out) {
+    (void)plugin;
+    return params_text_to_value(param_id, text, out);
+}
+
 static void plug_params_flush(const clap_plugin_t *plugin,
-                               const clap_input_events_t *in,
-                               const clap_output_events_t *out) {
+                              const clap_input_events_t *in,
+                              const clap_output_events_t *out) {
+    (void)out;
     ggd_plugin_t *plug = plugin->plugin_data;
     uint32_t count = in->size(in);
     for (uint32_t i = 0; i < count; i++) {
@@ -252,7 +247,7 @@ static void plug_params_flush(const clap_plugin_t *plugin,
         if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
         if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
             const clap_event_param_value_t *ev = (const clap_event_param_value_t *)hdr;
-            apply_param_value(plug, ev->param_id, ev->value);
+            plugin_apply_param(plug, ev->param_id, ev->value);
         }
     }
 }
@@ -281,121 +276,159 @@ static const clap_plugin_state_t s_state = {
     .load = plug_state_load,
 };
 
-// ---------- Plugin Lifecycle ----------
+// ---------- Library switching ----------
 
-static void resolve_samples_path(ggd_plugin_t *plug, const char *plugin_path) {
-    // Try to find samples relative to plugin location
-    // Expected: plugin is at <project>/vst/ggd-libre.clap
-    // Samples at: <project>/output/halpern/wav/
-    if (plugin_path && strlen(plugin_path) > 0) {
-        // Walk up from plugin_path to find output/halpern/wav
-        char base[1024];
-        strncpy(base, plugin_path, sizeof(base) - 1);
-
-        // Try stripping filename and /vst/ or just look relative
-        char *last_slash = strrchr(base, '/');
-        if (last_slash) {
-            *last_slash = '\0'; // now base = dir containing plugin
-            // Try <dir>/output/halpern/wav
-            snprintf(plug->samples_path, sizeof(plug->samples_path),
-                     "%s/output/halpern/wav", base);
-
-            FILE *test = fopen(plug->samples_path, "r");
-            if (!test) {
-                // Try going up one more level: <dir>/../output/halpern/wav
-                last_slash = strrchr(base, '/');
-                if (last_slash) {
-                    *last_slash = '\0';
-                    snprintf(plug->samples_path, sizeof(plug->samples_path),
-                             "%s/output/halpern/wav", base);
-                }
-            } else {
-                fclose(test);
-            }
-        }
-    }
-
-    // Fallback: check environment variable
-    if (plug->samples_path[0] == '\0') {
-        const char *env = getenv("GGD_SAMPLES_PATH");
-        if (env) strncpy(plug->samples_path, env, sizeof(plug->samples_path) - 1);
+void plugin_probe_libraries(ggd_plugin_t *plug) {
+    for (int l = 0; l < LIB_COUNT; l++) {
+        plug->lib_available[l] = library_probe(l, plug->base_path, plug->lib_root[l],
+                                               sizeof(plug->lib_root[l]));
+        fprintf(stderr, "ggd-libre: library %s: %s\n", library_def(l)->slug,
+                plug->lib_available[l] ? plug->lib_root[l] : "not found");
     }
 }
+
+static void notify_library_changed(ggd_plugin_t *plug) {
+    if (plug->host_note_name)
+        plug->host_note_name->changed(plug->host);
+    if (plug->host_audio_ports &&
+        plug->host_audio_ports->is_rescan_flag_supported(plug->host, CLAP_AUDIO_PORTS_RESCAN_NAMES))
+        plug->host_audio_ports->rescan(plug->host, CLAP_AUDIO_PORTS_RESCAN_NAMES);
+}
+
+bool plugin_select_library(ggd_plugin_t *plug, int lib) {
+    if (lib < 0 || lib >= LIB_COUNT) return false;
+    if (lib == plug->selected_lib) return true;
+    if (!plug->lib_available[lib]) {
+        plugin_probe_libraries(plug);
+        if (!plug->lib_available[lib]) return false;
+    }
+
+    LibraryRuntime *rt = library_load(lib, plug->lib_root[lib]);
+    if (!rt) {
+        plug->lib_available[lib] = false;
+        return false;
+    }
+    plug->selected_lib = lib;
+
+    if (!plug->activated) {
+        // No audio thread: swap directly.
+        library_free(atomic_exchange(&plug->pending, NULL));
+        library_free(atomic_exchange(&plug->active, rt));
+        engine_reset_voices(&plug->engine);
+        notify_library_changed(plug);
+    } else {
+        // A runtime still pending was never seen by the audio thread.
+        library_free(atomic_exchange(&plug->pending, rt));
+        if (plug->host) plug->host->request_process(plug->host);
+    }
+    return true;
+}
+
+bool plugin_swap_pending(const ggd_plugin_t *plug) {
+    return atomic_load(&((ggd_plugin_t *)plug)->pending) != NULL;
+}
+
+// Audio thread, start of each block. Fades out what is playing, then swaps.
+static void process_library_swap(ggd_plugin_t *plug) {
+    if (!atomic_load(&plug->pending)) return;
+    if (engine_any_active(&plug->engine)) {
+        engine_fade_all(&plug->engine);
+        return;
+    }
+    if (atomic_load(&plug->retired)) return;   // main thread hasn't freed the last one
+
+    LibraryRuntime *rt = atomic_exchange(&plug->pending, NULL);
+    if (!rt) return;
+    LibraryRuntime *old = atomic_exchange(&plug->active, rt);
+    atomic_store(&plug->retired, old);
+    engine_reset_voices(&plug->engine);
+    atomic_store(&plug->swap_done, true);
+    plug->host->request_callback(plug->host);
+}
+
+// Main thread: finish what the audio thread handed back.
+static void collect_swap(ggd_plugin_t *plug) {
+    library_free(atomic_exchange(&plug->retired, NULL));
+    if (atomic_exchange(&plug->swap_done, false))
+        notify_library_changed(plug);
+}
+
+// ---------- Preview queue ----------
+
+void plugin_preview_note(ggd_plugin_t *plug, int note, float velocity) {
+    unsigned head = atomic_load_explicit(&plug->preview.head, memory_order_relaxed);
+    unsigned tail = atomic_load_explicit(&plug->preview.tail, memory_order_acquire);
+    if (head - tail >= PREVIEW_QUEUE_SIZE) return;   // full: drop
+    plug->preview.items[head % PREVIEW_QUEUE_SIZE] =
+        (PreviewHit){ plug->selected_lib, note, velocity };
+    atomic_store_explicit(&plug->preview.head, head + 1, memory_order_release);
+    if (plug->host) plug->host->request_process(plug->host);
+}
+
+static void drain_previews(ggd_plugin_t *plug, const LibraryRuntime *rt, bool play) {
+    unsigned tail = atomic_load_explicit(&plug->preview.tail, memory_order_relaxed);
+    unsigned head = atomic_load_explicit(&plug->preview.head, memory_order_acquire);
+    for (; tail != head; tail++) {
+        PreviewHit hit = plug->preview.items[tail % PREVIEW_QUEUE_SIZE];
+        if (play && rt && hit.lib == rt->lib)
+            engine_note_on(&plug->engine, rt, &plug->mix[rt->lib], hit.note, hit.velocity);
+    }
+    atomic_store_explicit(&plug->preview.tail, tail, memory_order_release);
+}
+
+// ---------- Plugin Lifecycle ----------
 
 static bool plug_init(const struct clap_plugin *plugin) {
     ggd_plugin_t *plug = plugin->plugin_data;
 
-    plug->host_params = (const clap_host_params_t *)
-        plug->host->get_extension(plug->host, CLAP_EXT_PARAMS);
-    plug->host_state = (const clap_host_state_t *)
-        plug->host->get_extension(plug->host, CLAP_EXT_STATE);
-    plug->host_log = (const clap_host_log_t *)
-        plug->host->get_extension(plug->host, CLAP_EXT_LOG);
-    plug->host_timer = (const clap_host_timer_support_t *)
-        plug->host->get_extension(plug->host, CLAP_EXT_TIMER_SUPPORT);
-    plug->host_posix_fd = (const clap_host_posix_fd_support_t *)
-        plug->host->get_extension(plug->host, CLAP_EXT_POSIX_FD_SUPPORT);
+    plug->host_params = plug->host->get_extension(plug->host, CLAP_EXT_PARAMS);
+    plug->host_state = plug->host->get_extension(plug->host, CLAP_EXT_STATE);
+    plug->host_log = plug->host->get_extension(plug->host, CLAP_EXT_LOG);
+    plug->host_timer = plug->host->get_extension(plug->host, CLAP_EXT_TIMER_SUPPORT);
+    plug->host_posix_fd = plug->host->get_extension(plug->host, CLAP_EXT_POSIX_FD_SUPPORT);
+    plug->host_audio_ports = plug->host->get_extension(plug->host, CLAP_EXT_AUDIO_PORTS);
+    plug->host_note_name = plug->host->get_extension(plug->host, CLAP_EXT_NOTE_NAME);
 
-    // Bring the mixer up before anything else: the plugin struct is calloc'd, so
-    // without this every gain_linear is 0 (silence), and CLAP permits
-    // state.load() to arrive before activate().
+    params_init();
+
+    // Bring the mixer up before anything else: CLAP permits state.load() to
+    // arrive before activate().
     engine_init(&plug->engine, 48000.0f);
+    for (int l = 0; l < LIB_COUNT; l++)
+        libmix_init(&plug->mix[l], library_def(l));
 
-    // Load samples
-    if (plug->samples_path[0] == '\0') {
-        fprintf(stderr, "ggd-libre: no samples path configured\n");
-        return false;
+    plugin_probe_libraries(plug);
+
+    // Start on the first extracted library; GGD_LIBRE_LIBRARY=<slug> picks one.
+    // Missing samples are not fatal: the GUI shows which libraries to extract.
+    const char *want = getenv("GGD_LIBRE_LIBRARY");
+    if (want && want[0]) {
+        for (int l = 0; l < LIB_COUNT; l++)
+            if (!strcmp(library_def(l)->slug, want) && plugin_select_library(plug, l))
+                return true;
     }
+    for (int l = 0; l < LIB_COUNT; l++)
+        if (plug->lib_available[l] && plugin_select_library(plug, l))
+            return true;
 
-    fprintf(stderr, "ggd-libre: loading samples from %s\n", plug->samples_path);
-    if (!sample_bank_load(&plug->bank, plug->samples_path)) {
-        fprintf(stderr, "ggd-libre: failed to load samples\n");
-        return false;
-    }
-    engine_set_source_rate(&plug->engine, plug->bank.sample_rate);
-
-    // Load MIDI map
-    char json_path[1024];
-    // midi_map.json is one level up from the wav/ directory
-    char *wav_pos = strstr(plug->samples_path, "/wav");
-    if (wav_pos) {
-        size_t base_len = wav_pos - plug->samples_path;
-        snprintf(json_path, sizeof(json_path), "%.*s/midi_map.json",
-                 (int)base_len, plug->samples_path);
-    } else {
-        snprintf(json_path, sizeof(json_path), "%s/../midi_map.json",
-                 plug->samples_path);
-    }
-
-    if (!midi_map_load(&plug->midi_map, &plug->bank, json_path)) {
-        fprintf(stderr, "ggd-libre: failed to load MIDI map from %s\n", json_path);
-        sample_bank_free(&plug->bank);
-        return false;
-    }
-
-    // Set default variants
-    midi_map_update_variants(&plug->midi_map, &plug->bank,
-                             plug->kick_size, plug->snare_type,
-                             plug->tom_head, plug->china_size, plug->stack_type,
-                             plug->lcrash_size, plug->rcrash_size);
-
-    // Start background prefetch of sample data into OS page cache
-    sample_bank_prefetch(&plug->bank);
-
+    fprintf(stderr, "ggd-libre: no extracted library found\n");
     return true;
 }
 
 static void plug_destroy(const struct clap_plugin *plugin) {
     ggd_plugin_t *plug = plugin->plugin_data;
-    sample_bank_free(&plug->bank);
+    library_free(atomic_exchange(&plug->pending, NULL));
+    library_free(atomic_exchange(&plug->retired, NULL));
+    library_free(atomic_exchange(&plug->active, NULL));
     free(plug);
 }
 
 static bool plug_activate(const struct clap_plugin *plugin, double sample_rate,
-                           uint32_t min_frames, uint32_t max_frames) {
+                          uint32_t min_frames, uint32_t max_frames) {
+    (void)min_frames; (void)max_frames;
     ggd_plugin_t *plug = plugin->plugin_data;
     // Only refresh rate-dependent caches — a full engine_init here would wipe
-    // the mixer and any preset the host already restored via state.load().
+    // the master gain the host already restored via state.load().
     engine_set_sample_rate(&plug->engine, (float)sample_rate);
     engine_reset_voices(&plug->engine);
     plug->activated = true;
@@ -405,64 +438,59 @@ static bool plug_activate(const struct clap_plugin *plugin, double sample_rate,
 static void plug_deactivate(const struct clap_plugin *plugin) {
     ggd_plugin_t *plug = plugin->plugin_data;
     plug->activated = false;
+    // The audio thread is stopped: complete any hand-off directly.
+    collect_swap(plug);
+    LibraryRuntime *rt = atomic_exchange(&plug->pending, NULL);
+    if (rt) {
+        library_free(atomic_exchange(&plug->active, rt));
+        engine_reset_voices(&plug->engine);
+        notify_library_changed(plug);
+    }
 }
 
-static bool plug_start_processing(const struct clap_plugin *plugin) { return true; }
-static void plug_stop_processing(const struct clap_plugin *plugin) {}
+static bool plug_start_processing(const struct clap_plugin *plugin) { (void)plugin; return true; }
+static void plug_stop_processing(const struct clap_plugin *plugin) { (void)plugin; }
 
 static void plug_reset(const struct clap_plugin *plugin) {
     ggd_plugin_t *plug = plugin->plugin_data;
     engine_reset_voices(&plug->engine);
 }
 
-static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
+static void process_event(ggd_plugin_t *plug, const LibraryRuntime *rt, bool accept_notes,
+                          const clap_event_header_t *hdr) {
     if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
+    const LibMix *mix = rt ? &plug->mix[rt->lib] : NULL;
 
     switch (hdr->type) {
     case CLAP_EVENT_NOTE_ON: {
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
         // No logging here: process_event runs on the audio thread, where a
         // blocking write to stderr is a real-time violation and can glitch.
-        int key = ev->key;
-        key = midi_remap_note(key, plug->midi_map_mode);
-        engine_note_on(&plug->engine, &plug->bank, &plug->midi_map,
-                       key, (float)ev->velocity);
+        if (!accept_notes || !rt) break;
+        int key = midi_remap_note(ev->key, plug->midi_map_mode);
+        engine_note_on(&plug->engine, rt, mix, key, (float)ev->velocity);
         break;
     }
     case CLAP_EVENT_NOTE_OFF: {
         const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
-        int key = ev->key;
-        key = midi_remap_note(key, plug->midi_map_mode);
-        engine_note_off(&plug->engine, key);
+        engine_note_off(&plug->engine, midi_remap_note(ev->key, plug->midi_map_mode));
         break;
     }
-    case CLAP_EVENT_NOTE_CHOKE: {
-        const clap_event_note_t *ev = (const clap_event_note_t *)hdr;
-        // Kill all voices for this note
-        float step = plug->engine.choke_fade_samples > 0.0f
-                   ? 1.0f / plug->engine.choke_fade_samples : 1.0f;
-        for (int i = 0; i < MAX_VOICES; i++) {
-            if (plug->engine.voices[i].active) {
-                plug->engine.voices[i].fading_out = true;
-                plug->engine.voices[i].fade_gain = 1.0f;
-                plug->engine.voices[i].fade_step = step;
-            }
-        }
+    case CLAP_EVENT_NOTE_CHOKE:
+        engine_fade_all(&plug->engine);
         break;
-    }
     case CLAP_EVENT_PARAM_VALUE: {
         const clap_event_param_value_t *ev = (const clap_event_param_value_t *)hdr;
-        apply_param_value(plug, ev->param_id, ev->value);
+        plugin_apply_param(plug, ev->param_id, ev->value);
         break;
     }
     case CLAP_EVENT_MIDI: {
         const clap_event_midi_t *ev = (const clap_event_midi_t *)hdr;
         uint8_t status = ev->data[0] & 0xF0;
         if (status == 0x90 && ev->data[2] > 0) {
-            float vel = ev->data[2] / 127.0f;
-            int key = ev->data[1];
-            key = midi_remap_note(key, plug->midi_map_mode);
-            engine_note_on(&plug->engine, &plug->bank, &plug->midi_map, key, vel);
+            if (!accept_notes || !rt) break;
+            int key = midi_remap_note(ev->data[1], plug->midi_map_mode);
+            engine_note_on(&plug->engine, rt, mix, key, ev->data[2] / 127.0f);
         } else if (status == 0x80 || (status == 0x90 && ev->data[2] == 0)) {
             engine_note_off(&plug->engine, ev->data[1]);
         }
@@ -472,12 +500,20 @@ static void process_event(ggd_plugin_t *plug, const clap_event_header_t *hdr) {
 }
 
 static clap_process_status plug_process(const struct clap_plugin *plugin,
-                                         const clap_process_t *process) {
+                                        const clap_process_t *process) {
     ggd_plugin_t *plug = plugin->plugin_data;
     const uint32_t nframes = process->frames_count;
     const uint32_t nev = process->in_events->size(process->in_events);
     uint32_t ev_index = 0;
     uint32_t next_ev_frame = nev > 0 ? 0 : nframes;
+
+    process_library_swap(plug);
+    const LibraryRuntime *rt = atomic_load(&plug->active);
+    // While a new library is waiting, let the old one fade instead of
+    // starting new hits on it.
+    const bool accept_notes = !atomic_load(&plug->pending);
+    const LibMix *mix = rt ? &plug->mix[rt->lib] : &plug->mix[0];
+    drain_previews(plug, rt, accept_notes);
 
     // Build output buffer array from host-provided ports
     uint32_t num_ports = process->audio_outputs_count;
@@ -502,7 +538,7 @@ static clap_process_status plug_process(const struct clap_plugin *plugin,
                 next_ev_frame = hdr->time;
                 break;
             }
-            process_event(plug, hdr);
+            process_event(plug, rt, accept_notes, hdr);
             ++ev_index;
             if (ev_index == nev) {
                 next_ev_frame = nframes;
@@ -519,20 +555,40 @@ static clap_process_status plug_process(const struct clap_plugin *plugin,
             block_outs[p].r = outs[p].r ? outs[p].r + i : NULL;
         }
 
-        engine_render(&plug->engine, &plug->bank,
-                      block_outs, NUM_OUTPUT_PORTS, block_size);
+        engine_render(&plug->engine, rt, mix, block_outs, num_ports, block_size);
         i = next_ev_frame;
     }
 
-    // Check if any voices are still active
-    for (int vi = 0; vi < MAX_VOICES; vi++) {
-        if (plug->engine.voices[vi].active)
-            return CLAP_PROCESS_CONTINUE;
-    }
+    if (engine_any_active(&plug->engine) || atomic_load(&plug->pending))
+        return CLAP_PROCESS_CONTINUE;
     return CLAP_PROCESS_SLEEP;
 }
 
+// ---------- Test extension (headless render host) ----------
+
+typedef struct {
+    bool (*select_library)(const clap_plugin_t *plugin, const char *slug);
+    bool (*swap_pending)(const clap_plugin_t *plugin);
+} ggd_test_ext_t;
+
+static bool test_select_library(const clap_plugin_t *plugin, const char *slug) {
+    for (int l = 0; l < LIB_COUNT; l++)
+        if (!strcmp(library_def(l)->slug, slug))
+            return plugin_select_library(plugin->plugin_data, l);
+    return false;
+}
+
+static bool test_swap_pending(const clap_plugin_t *plugin) {
+    return plugin_swap_pending(plugin->plugin_data);
+}
+
+static const ggd_test_ext_t s_test_ext = {
+    .select_library = test_select_library,
+    .swap_pending = test_swap_pending,
+};
+
 static const void *plug_get_extension(const struct clap_plugin *plugin, const char *id) {
+    (void)plugin;
     if (!strcmp(id, CLAP_EXT_AUDIO_PORTS))       return &s_audio_ports;
     if (!strcmp(id, CLAP_EXT_NOTE_PORTS))        return &s_note_ports;
     if (!strcmp(id, CLAP_EXT_NOTE_NAME))         return &s_note_name;
@@ -543,10 +599,13 @@ static const void *plug_get_extension(const struct clap_plugin *plugin, const ch
 #ifdef __linux__
     if (!strcmp(id, CLAP_EXT_POSIX_FD_SUPPORT))  return &ggd_posix_fd_ext;
 #endif
+    if (!strcmp(id, "com.ggd-libre.test"))       return &s_test_ext;
     return NULL;
 }
 
-static void plug_on_main_thread(const struct clap_plugin *plugin) {}
+static void plug_on_main_thread(const struct clap_plugin *plugin) {
+    collect_swap(plugin->plugin_data);
+}
 
 const clap_plugin_descriptor_t *ggd_get_descriptor(void) {
     return &s_descriptor;
@@ -557,6 +616,14 @@ clap_plugin_t *ggd_plugin_create(const clap_host_t *host) {
     if (!p) return NULL;
 
     p->host = host;
+    p->selected_lib = -1;
+    atomic_init(&p->active, NULL);
+    atomic_init(&p->pending, NULL);
+    atomic_init(&p->retired, NULL);
+    atomic_init(&p->swap_done, false);
+    atomic_init(&p->preview.head, 0);
+    atomic_init(&p->preview.tail, 0);
+
     p->plugin.desc = &s_descriptor;
     p->plugin.plugin_data = p;
     p->plugin.init = plug_init;

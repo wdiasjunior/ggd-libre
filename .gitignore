@@ -5,7 +5,9 @@ output
 
 # Build artifacts
 plugin/src/*.o
+plugin/src/*.d
 plugin/third_party/cjson/*.o
+plugin/third_party/cjson/*.d
 plugin/third_party/mingw-cairo/build/
 plugin/third_party/mingw-cairo/linux-sysroot/
 plugin/third_party/mingw-cairo/sysroot/

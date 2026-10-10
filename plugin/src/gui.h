@@ -42,6 +42,7 @@ typedef struct {
     cairo_t          *cr;
 
     GuiTab active_tab;
+    int    loading_lib;   // library being loaded right now, or -1
     int    width;
     int    height;
 
@@ -73,7 +74,7 @@ extern const clap_plugin_posix_fd_support_t ggd_posix_fd_ext;
 #endif
 
 #define GUI_WIDTH  1010
-#define GUI_HEIGHT 490
+#define GUI_HEIGHT 520
 
 // Shared drawing/logic (defined in gui_common.c, called by platform backends)
 void gui_draw(PluginGui *gui);

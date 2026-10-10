@@ -192,8 +192,9 @@ writes nothing.
 
 ### Step 4: Install for the CLAP plugin
 
-> Plugin support for these two kits is still in progress. Until it lands,
-> the index is built but the plugin only loads the Halpern pack.
+The plugin shows one tab per library in the bar at the top of its window.
+Libraries it cannot find are greyed out and marked "not extracted"; clicking
+one re-scans the disk.
 
 The plugin looks for `<root>/<slug>/library_index.json`. The simplest setup
 is to point `GGD_LIBRE_ROOT` at a folder that holds the library folders:

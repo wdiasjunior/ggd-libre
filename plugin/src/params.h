@@ -2,18 +2,32 @@
 #define GGD_PARAMS_H
 
 #include "types.h"
+#include "library.h"
 #include <clap/clap.h>
 
-uint32_t params_count(void);
-bool     params_get_info(uint32_t param_index, clap_param_info_t *info);
-bool     params_get_value(uint32_t param_id, const void *plugin_data, double *out);
-bool     params_value_to_text(uint32_t param_id, double value,
-                              char *buf, uint32_t buf_size);
-bool     params_text_to_value(uint32_t param_id, const char *text, double *out);
+typedef enum {
+    PK_NONE = 0,
+    PK_MASTER,
+    PK_MIDI_MAP,
+    PK_TAB_MASTER,   // index = tab
+    PK_CHANNEL,      // index = channel, offset = PARAM_CH_*
+    PK_SELECTOR,     // index = selector
+} ParamKind;
 
-// Maps param_index (0..N-1) to param_id
+typedef struct {
+    ParamKind kind;
+    int       lib;
+    int       index;
+    int       offset;
+} ParamRef;
+
+// Build the id table. Call once before using the others (plug_init).
+void     params_init(void);
+uint32_t params_count(void);
 uint32_t params_index_to_id(uint32_t index);
-// Maps param_id back to param_index, returns -1 if invalid
-int      params_id_to_index(uint32_t id);
+bool     params_resolve(uint32_t id, ParamRef *out);
+bool     params_get_info(uint32_t param_index, clap_param_info_t *info);
+bool     params_value_to_text(uint32_t param_id, double value, char *buf, uint32_t buf_size);
+bool     params_text_to_value(uint32_t param_id, const char *text, double *out);
 
 #endif
