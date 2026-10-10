@@ -44,7 +44,7 @@ const LibraryDef LIB_DEF_OKW = {
     .slug = "okw_metal",
     .name = "ONE KIT WONDER",
     .param_prefix = "OKW",
-    .install_dirs = { "GGD One Kit Wonder Metal Samples", NULL },
+    .install_dirs = { NULL },
     .param_base = 1000,
 
     .num_mics = 3,

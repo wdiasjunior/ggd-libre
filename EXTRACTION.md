@@ -69,31 +69,20 @@ python generate_sfz.py \
 
 ### Step 5: Install for the CLAP plugin
 
-Copy the output to the plugin's sample directory:
+Copy the library folder into `ggd-libre-data/` next to the `.clap` file (see
+[Installing](README.md#installing)):
 
-**Linux:**
 ```bash
-mkdir -p ~/.clap/GGD\ Matt\ Halpern\ Signature\ Pack/
-cp -r output/halpern/wav output/halpern/midi_map.json output/halpern/library_index.json \
-    ~/.clap/GGD\ Matt\ Halpern\ Signature\ Pack/
+mkdir -p ~/.clap/ggd-libre-data
+cp -r output/halpern ~/.clap/ggd-libre-data/
 cp plugin/ggd-libre-linux.clap ~/.clap/
 ```
 
-**Windows:**
-Copy to the same directory as the `.clap` file:
-```
-C:\Program Files\Common Files\CLAP\
-├── ggd-libre-windows.clap
-└── GGD Matt Halpern Signature Pack\
-    ├── midi_map.json
-    ├── library_index.json
-    └── wav\
-        ├── CloseMic\
-        ├── OHMic\
-        └── ...
-```
-
-Or set the environment variable `GGD_SAMPLES_PATH` to point to the `wav/` directory.
+The plugin only needs `wav/` and `library_index.json`; `midi_map.json` is
+used by `build_index.py`. Installs from earlier versions, in
+`GGD Matt Halpern Signature Pack/` next to the `.clap` file or pointed to by
+`GGD_SAMPLES_PATH`, still work as long as that folder also has
+`library_index.json`.
 
 ## GGD One Kit Wonder Metal / GGD PV Matt Halpern Signature Pack
 
@@ -196,23 +185,15 @@ The plugin shows one tab per library in the bar at the top of its window.
 Libraries it cannot find are greyed out and marked "not extracted"; clicking
 one re-scans the disk.
 
-The plugin looks for `<root>/<slug>/library_index.json`. The simplest setup
-is to point `GGD_LIBRE_ROOT` at a folder that holds the library folders:
-
-```
-~/GGD Libre/
-├── halpern/       (library_index.json + wav/)
-├── okw_metal/     (library_index.json + wav/)
-└── pv_halpern/    (library_index.json + wav/)
-```
+Copy each library folder into `ggd-libre-data/` next to the `.clap` file,
+as for the Halpern pack:
 
 ```bash
-export GGD_LIBRE_ROOT="$HOME/GGD Libre"
+cp -r output/okw_metal output/pv_halpern ~/.clap/ggd-libre-data/
 ```
 
-On Windows, set `GGD_LIBRE_ROOT` as a user environment variable. During
-development, the plugin also finds `output/<slug>/` next to the `.clap` file
-or one folder above it.
+See [Installing](README.md#installing) for the full layout and the
+`GGD_LIBRE_ROOT` override.
 
 ## File format reference
 

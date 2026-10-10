@@ -65,6 +65,7 @@ const LibraryDef LIB_DEF_HALPERN = {
     .slug = "halpern",
     .name = "MATT HALPERN",
     .param_prefix = "",
+    // Where earlier versions told users to install the Halpern samples.
     .install_dirs = { "GGD Matt Halpern Signature Pack", NULL },
     .param_base = 0,
 

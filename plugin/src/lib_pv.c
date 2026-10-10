@@ -60,7 +60,7 @@ const LibraryDef LIB_DEF_PV = {
     .slug = "pv_halpern",
     .name = "PV HALPERN",
     .param_prefix = "PV",
-    .install_dirs = { "GGD PV Matt Halpern Signature Pack Samples", NULL },
+    .install_dirs = { NULL },
     .param_base = 2000,
 
     .num_mics = 10,

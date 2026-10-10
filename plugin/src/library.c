@@ -191,10 +191,15 @@ bool library_probe(int lib, const char *base, char *out_root, size_t out_size) {
     }
     if (!base || !base[0]) return false;
 
+    // The standard install: ggd-libre-data/<slug>/ next to the .clap file.
+    snprintf(dir, sizeof(dir), "%s/" LIBRARY_DATA_DIR "/%s", base, def->slug);
+    if (try_root(dir, out_root, out_size)) return true;
+
     for (int i = 0; i < 3 && def->install_dirs[i]; i++) {
         snprintf(dir, sizeof(dir), "%s/%s", base, def->install_dirs[i]);
         if (try_root(dir, out_root, out_size)) return true;
     }
+    // Development: the repo's output/ folder, next to or above the .clap file.
     snprintf(dir, sizeof(dir), "%s/output/%s", base, def->slug);
     if (try_root(dir, out_root, out_size)) return true;
     snprintf(dir, sizeof(dir), "%s/../output/%s", base, def->slug);

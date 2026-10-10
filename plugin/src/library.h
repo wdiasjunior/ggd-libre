@@ -11,6 +11,9 @@
 #include "sample_bank.h"
 #include "midi_map.h"
 
+// Folder next to the .clap file that holds one subfolder per library slug.
+#define LIBRARY_DATA_DIR  "ggd-libre-data"
+
 #define MAX_SELECTORS     12
 #define MAX_SEL_OPTIONS   8
 #define MAX_BOTTOM_ITEMS  8
@@ -50,7 +53,7 @@ typedef struct LibraryDef {
     const char *slug;               // folder name under output/, e.g. "okw_metal"
     const char *name;               // library bar caption
     const char *param_prefix;       // prepended to param/port names ("" for Halpern)
-    const char *install_dirs[3];    // folder names under the plugin dir, NULL-terminated
+    const char *install_dirs[3];    // legacy folder names under the plugin dir, NULL-terminated
     uint32_t    param_base;
 
     int         num_mics;
@@ -105,7 +108,11 @@ LibraryRuntime *library_load(int lib, const char *root);
 void library_free(LibraryRuntime *rt);
 
 // Find the library's root folder (one containing library_index.json).
-// base is the plugin's directory. Returns false if not found.
+// base is the plugin's directory. Searched in order:
+//   $GGD_SAMPLES_PATH/.. (Halpern only), $GGD_LIBRE_ROOT/<slug>,
+//   <base>/ggd-libre-data/<slug>, <base>/<legacy install dir>,
+//   <base>/output/<slug>, <base>/../output/<slug>
+// Returns false if not found.
 bool library_probe(int lib, const char *base, char *out_root, size_t out_size);
 
 // Param id helpers
